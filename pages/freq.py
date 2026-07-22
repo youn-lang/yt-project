@@ -585,17 +585,41 @@ else:
             pos_display_df.loc[pos_counts > 1, "단어"] + " · " + pos_display_df.loc[pos_counts > 1, "품사"]
         )
 
-        pos_list_col, pos_chart_col = st.columns([0.9, 1.6])
+        # 표 높이를 제목행 1개와 실제 데이터 행 수에 맞춰 계산합니다.
+        # 이전처럼 최소 높이를 300px로 고정하면, 상위 10개만 표시할 때
+        # 데이터가 없는 빈 행처럼 보이는 여백이 생길 수 있습니다.
+        table_row_height = 35
+        table_header_height = 38
+        pos_table_height = (
+            table_header_height
+            + table_row_height * len(pos_display_df)
+            + 3
+        )
+
+        # 단어 목록 영역을 조금 좁히고 그래프 영역을 더 넓게 배치합니다.
+        pos_list_col, pos_chart_col = st.columns([0.75, 1.75])
+
         with pos_list_col:
             st.dataframe(
                 pos_display_df[["단어", "빈도수", "품사"]],
                 use_container_width=True,
                 hide_index=True,
-                height=max(300, min(680, 42 * len(pos_display_df) + 38)),
+                height=pos_table_height,
+                row_height=table_row_height,
                 column_config={
-                    "단어": st.column_config.TextColumn("단어", width="large"),
-                    "빈도수": st.column_config.NumberColumn("빈도수", format="%d", width="small"),
-                    "품사": st.column_config.TextColumn("세부 품사", width="medium"),
+                    "단어": st.column_config.TextColumn(
+                        "단어",
+                        width="small",
+                    ),
+                    "빈도수": st.column_config.NumberColumn(
+                        "빈도수",
+                        format="%d",
+                        width="small",
+                    ),
+                    "품사": st.column_config.TextColumn(
+                        "세부 품사",
+                        width="medium",
+                    ),
                 },
             )
         with pos_chart_col:
