@@ -66,8 +66,8 @@ st.markdown(
             linear-gradient(135deg, rgba(255,255,255,0.98), rgba(239,242,228,0.96));
         border: 1px solid var(--line);
         border-radius: 26px;
-        padding: 1.45rem 1.8rem;
-        margin-bottom: 0.85rem;
+        padding: 0.95rem 1.35rem;
+        margin-bottom: 0.65rem;
         box-shadow: 0 16px 40px rgba(36, 51, 31, 0.10);
     }
 
@@ -101,7 +101,7 @@ st.markdown(
         z-index: 2;
         display: grid;
         grid-template-columns: 1.15fr 0.85fr;
-        gap: 1.2rem;
+        gap: 0.8rem;
         align-items: center;
     }
 
@@ -116,7 +116,7 @@ st.markdown(
     }
 
     .hero-title {
-        font-size: clamp(1.8rem, 3.1vw, 3.1rem);
+        font-size: clamp(1.55rem, 2.5vw, 2.45rem);
         line-height: 1.06;
         font-weight: 900;
         margin: 0;
@@ -128,16 +128,16 @@ st.markdown(
     }
 
     .hero-copy {
-        margin-top: 0.65rem;
+        margin-top: 0.4rem;
         color: var(--gray);
-        font-size: 0.96rem;
-        line-height: 1.55;
+        font-size: 0.9rem;
+        line-height: 1.4;
         max-width: 650px;
     }
 
     .visual-panel {
         position: relative;
-        min-height: 175px;
+        min-height: 125px;
     }
 
     .screen {
@@ -145,7 +145,7 @@ st.markdown(
         right: 12px;
         top: 8px;
         width: 76%;
-        height: 128px;
+        height: 94px;
         border: 9px solid #2e3e28;
         border-radius: 18px;
         background: #fdfdf9;
@@ -153,7 +153,7 @@ st.markdown(
     }
 
     .screen-bar {
-        height: 13px;
+        height: 10px;
         border-bottom: 1px solid #d9ddcf;
         display: flex;
         gap: 6px;
@@ -228,22 +228,22 @@ st.markdown(
 
     .screen-stand {
         position: absolute;
-        width: 68px;
+        width: 56px;
         height: 13px;
         background: #2e3e28;
-        right: 74px;
-        top: 148px;
+        right: 64px;
+        top: 108px;
         border-radius: 3px;
     }
 
     .screen-stand::before {
         content: "";
         position: absolute;
-        width: 22px;
-        height: 26px;
+        width: 18px;
+        height: 20px;
         background: #2e3e28;
-        left: 23px;
-        top: -19px;
+        left: 19px;
+        top: -15px;
     }
 
     .bubble {
@@ -387,7 +387,7 @@ st.markdown(
 
     @media (max-width: 820px) {
         .hero {
-            padding: 1.1rem;
+            padding: 0.85rem 1rem;
         }
 
         .hero-grid {
@@ -396,7 +396,7 @@ st.markdown(
         }
 
         .visual-panel {
-            min-height: 145px;
+            min-height: 110px;
         }
 
         .hero-title {
@@ -441,14 +441,12 @@ st.markdown(
                     <span>언어 분석</span> 도구
                 </h1>
                 <p class="hero-copy">
-                    유튜브 댓글을 수집하고 작성자, 시점, 표현, 반응을
-                    언어학적 관점에서 분석하기 위한 데이터 수집 단계입니다.
+                    유튜브 댓글을 수집하고 사용 어휘와 표현의 구조, 감정 등을
+                    언어학적 관점에서 분석하기 위한 도구입니다.
                 </p>
             </div>
 
             <div class="visual-panel">
-                <div class="linguistic-symbols">β a あ</div>
-
                 <div class="bubble two">
                     <div class="dots">
                         <span></span><span></span><span></span>
@@ -490,14 +488,15 @@ st.markdown(
 
 
 # ------------------------------------------------------------
-# 4. 예시 영상 링크
+# 4. 영상 링크와 분석 언어 기본값
 # ------------------------------------------------------------
-EXAMPLE_1_URL = "https://youtu.be/d95J8yzvjbQ?si=LfL5DLwCL8Pk077r"
-EXAMPLE_2_URL = "https://youtu.be/I9vK5EVTt0U?si=NEZ8L7MRuNvrzINa"
-EXAMPLE_3_URL = "https://www.youtube.com/watch?v=7lXj30zLaXI"
+DEFAULT_URL = "https://youtu.be/d95J8yzvjbQ?si=LfL5DLwCL8Pk077r"
 
 if "youtube_url" not in st.session_state:
-    st.session_state.youtube_url = EXAMPLE_1_URL
+    st.session_state.youtube_url = DEFAULT_URL
+
+if "analysis_language" not in st.session_state:
+    st.session_state.analysis_language = "한국어"
 
 st.markdown(
     """
@@ -510,40 +509,28 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-example_col1, example_col2, example_col3 = st.columns(3)
+language_col, url_col = st.columns([0.85, 2.15])
 
-with example_col1:
-    if st.button(
-        "예시 1 · 딥마인드 다큐(영어 댓글)",
-        use_container_width=True,
-    ):
-        st.session_state.youtube_url = EXAMPLE_1_URL
+with language_col:
+    analysis_language = st.selectbox(
+        "분석 언어",
+        options=["한국어", "일본어", "영어"],
+        key="analysis_language",
+        help="댓글의 주된 언어를 선택합니다. 서브 페이지에서 이 언어에 맞는 분석기를 사용합니다.",
+    )
 
-with example_col2:
-    if st.button(
-        "예시 2 · 2002 월드컵 추억(한국어 댓글)",
-        use_container_width=True,
-    ):
-        st.session_state.youtube_url = EXAMPLE_2_URL
-
-with example_col3:
-    if st.button(
-        "예시 3 · Avengers: Endgame 명장면 (일본어 댓글)",
-        use_container_width=True,
-    ):
-        st.session_state.youtube_url = EXAMPLE_3_URL
-
-youtube_url = st.text_input(
-    "유튜브 영상 링크",
-    key="youtube_url",
-    placeholder="https://www.youtube.com/watch?v=영상ID",
-    label_visibility="collapsed",
-)
+with url_col:
+    youtube_url = st.text_input(
+        "유튜브 영상 링크",
+        key="youtube_url",
+        placeholder="https://www.youtube.com/watch?v=영상ID",
+    )
 
 st.markdown(
     """
         <p class="small-note">
-            youtu.be, youtube.com/watch, Shorts, embed, live 주소를 지원합니다.
+            분석 언어를 먼저 선택한 뒤 유튜브 링크를 입력하세요.
+            youtu.be, youtube.com/watch, Shorts, embed, live 주소를 지원하며
             si 같은 부가 주소 값은 자동으로 무시합니다.
         </p>
     </div>
@@ -844,6 +831,7 @@ if load_button:
             st.session_state["comments_df"] = comments_df
             st.session_state["video_id"] = video_id
             st.session_state["video_url"] = youtube_url
+            st.session_state["analysis_language"] = analysis_language
 
             metric_col1, metric_col2 = st.columns(2)
 
