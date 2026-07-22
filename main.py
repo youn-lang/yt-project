@@ -490,10 +490,8 @@ st.markdown(
 # ------------------------------------------------------------
 # 4. 영상 링크와 분석 언어 기본값
 # ------------------------------------------------------------
-DEFAULT_URL = "https://youtu.be/d95J8yzvjbQ?si=LfL5DLwCL8Pk077r"
-
 if "youtube_url" not in st.session_state:
-    st.session_state.youtube_url = DEFAULT_URL
+    st.session_state.youtube_url = ""
 
 if "selected_analysis_language" not in st.session_state:
     st.session_state["selected_analysis_language"] = "한국어"
@@ -533,7 +531,7 @@ with url_col:
     youtube_url = st.text_input(
         "유튜브 영상 링크",
         key="youtube_url",
-        placeholder="https://www.youtube.com/watch?v=영상ID",
+        placeholder="예: https://youtube.com/",
     )
 
 st.markdown(
