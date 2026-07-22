@@ -66,8 +66,8 @@ st.markdown(
             linear-gradient(135deg, rgba(255,255,255,0.98), rgba(239,242,228,0.96));
         border: 1px solid var(--line);
         border-radius: 26px;
-        padding: 2.3rem 2.5rem;
-        margin-bottom: 1.4rem;
+        padding: 1.45rem 1.8rem;
+        margin-bottom: 0.85rem;
         box-shadow: 0 16px 40px rgba(36, 51, 31, 0.10);
     }
 
@@ -101,7 +101,7 @@ st.markdown(
         z-index: 2;
         display: grid;
         grid-template-columns: 1.15fr 0.85fr;
-        gap: 2rem;
+        gap: 1.2rem;
         align-items: center;
     }
 
@@ -116,7 +116,7 @@ st.markdown(
     }
 
     .hero-title {
-        font-size: clamp(2.2rem, 4vw, 4.2rem);
+        font-size: clamp(1.8rem, 3.1vw, 3.1rem);
         line-height: 1.06;
         font-weight: 900;
         margin: 0;
@@ -128,32 +128,32 @@ st.markdown(
     }
 
     .hero-copy {
-        margin-top: 1.1rem;
+        margin-top: 0.65rem;
         color: var(--gray);
-        font-size: 1.04rem;
-        line-height: 1.75;
+        font-size: 0.96rem;
+        line-height: 1.55;
         max-width: 650px;
     }
 
     .visual-panel {
         position: relative;
-        min-height: 250px;
+        min-height: 175px;
     }
 
     .screen {
         position: absolute;
         right: 12px;
-        top: 18px;
-        width: 82%;
-        height: 180px;
-        border: 12px solid #2e3e28;
+        top: 8px;
+        width: 76%;
+        height: 128px;
+        border: 9px solid #2e3e28;
         border-radius: 18px;
         background: #fdfdf9;
         box-shadow: 0 16px 26px rgba(36, 51, 31, 0.18);
     }
 
     .screen-bar {
-        height: 24px;
+        height: 13px;
         border-bottom: 1px solid #d9ddcf;
         display: flex;
         gap: 6px;
@@ -170,15 +170,15 @@ st.markdown(
 
     .screen-content {
         display: grid;
-        grid-template-columns: 66px 1fr;
+        grid-template-columns: 48px 1fr;
         gap: 12px;
-        padding: 18px;
+        padding: 11px;
         align-items: start;
     }
 
     .youtube-box {
-        width: 58px;
-        height: 40px;
+        width: 43px;
+        height: 30px;
         border-radius: 10px;
         background: var(--orange);
         position: relative;
@@ -188,16 +188,16 @@ st.markdown(
     .youtube-box::after {
         content: "";
         position: absolute;
-        left: 24px;
-        top: 12px;
-        border-left: 13px solid white;
-        border-top: 8px solid transparent;
-        border-bottom: 8px solid transparent;
+        left: 18px;
+        top: 9px;
+        border-left: 10px solid white;
+        border-top: 6px solid transparent;
+        border-bottom: 6px solid transparent;
     }
 
     .comment-lines {
         display: grid;
-        gap: 11px;
+        gap: 7px;
         padding-top: 4px;
     }
 
@@ -217,33 +217,33 @@ st.markdown(
 
     .comment-line b {
         display: block;
-        height: 6px;
+        height: 5px;
         border-radius: 999px;
         background: #bdc6aa;
     }
 
-    .comment-line:nth-child(2) b { width: 82%; }
+    .comment-line:nth-child(2) b { width: 76%; }
     .comment-line:nth-child(3) b { width: 67%; }
     .comment-line:nth-child(4) b { width: 91%; }
 
     .screen-stand {
         position: absolute;
-        width: 86px;
-        height: 18px;
+        width: 68px;
+        height: 13px;
         background: #2e3e28;
-        right: 92px;
-        top: 205px;
+        right: 74px;
+        top: 148px;
         border-radius: 3px;
     }
 
     .screen-stand::before {
         content: "";
         position: absolute;
-        width: 28px;
-        height: 35px;
+        width: 22px;
+        height: 26px;
         background: #2e3e28;
-        left: 29px;
-        top: -25px;
+        left: 23px;
+        top: -19px;
     }
 
     .bubble {
@@ -255,15 +255,15 @@ st.markdown(
     }
 
     .bubble.one {
-        width: 98px;
-        height: 66px;
+        width: 76px;
+        height: 50px;
         right: 0;
         top: 0;
     }
 
     .bubble.two {
-        width: 82px;
-        height: 58px;
+        width: 64px;
+        height: 45px;
         left: 12px;
         top: 42px;
         background: var(--olive);
@@ -306,20 +306,20 @@ st.markdown(
 
     .linguistic-symbols {
         position: absolute;
-        right: 88px;
+        right: 70px;
         top: -4px;
         color: rgba(125, 141, 77, 0.42);
-        font-size: 2.2rem;
+        font-size: 1.55rem;
         font-weight: 800;
-        letter-spacing: 0.55rem;
+        letter-spacing: 0.35rem;
     }
 
     .section-card {
         background: rgba(255, 255, 255, 0.95);
         border: 1px solid var(--line);
         border-radius: 20px;
-        padding: 1.15rem 1.25rem;
-        margin-bottom: 1rem;
+        padding: 0.9rem 1.1rem;
+        margin-bottom: 0.75rem;
         box-shadow: 0 10px 26px rgba(36, 51, 31, 0.07);
     }
 
@@ -387,7 +387,7 @@ st.markdown(
 
     @media (max-width: 820px) {
         .hero {
-            padding: 1.6rem 1.3rem;
+            padding: 1.15rem 1rem;
         }
 
         .hero-grid {
@@ -395,11 +395,11 @@ st.markdown(
         }
 
         .visual-panel {
-            min-height: 225px;
+            min-height: 160px;
         }
 
         .hero-title {
-            font-size: 2.25rem;
+            font-size: 1.9rem;
         }
     }
     </style>
