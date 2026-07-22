@@ -4,9 +4,8 @@ from collections import Counter
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from fugashi import Tagger
 from kiwipiepy import Kiwi
-from unidic_lite import DICDIR
+from sudachipy import dictionary, tokenizer
 
 
 # ------------------------------------------------------------
@@ -66,7 +65,7 @@ st.markdown(
     }
 
     .page-hero::after {
-        content: "Aa  가나다  日本語  💬";
+        content: "Aa  가나다  #  💬";
         position: absolute;
         right: 1.5rem;
         top: 0.8rem;
@@ -172,7 +171,7 @@ st.markdown(
         <div class="page-kicker">LEXICAL ANALYSIS</div>
         <h1 class="page-title">어휘 분석</h1>
         <p class="page-copy">
-            한국어·일본어·영어 댓글을 형태소 단위로 분석하고 어휘 빈도와 품사를 확인합니다.
+            수집한 댓글을 형태소 단위로 분석하고 빈도와 실제 사용 문맥을 확인합니다.
         </p>
     </section>
     """,
@@ -237,386 +236,209 @@ with metric_col2:
     non_empty_count = comments_df["댓글"].str.strip().ne("").sum()
     st.metric("내용이 있는 댓글", f"{non_empty_count:,}개")
 
-analysis_mode = st.selectbox(
-    "형태소 분석 언어",
-    options=["자동 판별", "한국어", "일본어"],
-    index=0,
-    help=(
-        "자동 판별은 댓글에 일본어 가나가 포함되어 있으면 일본어 분석기를, "
-        "그 밖에는 한국어 분석기를 사용합니다. 일본어 댓글만 분석할 때는 "
-        "'일본어'를 직접 선택하면 한자만 있는 댓글도 일본어로 처리할 수 있습니다."
-    ),
-)
-
 
 # ------------------------------------------------------------
 # 3. 형태소 분석 준비
 # ------------------------------------------------------------
 @st.cache_resource
 def load_kiwi() -> Kiwi:
-    """
-    Kiwi 분석기는 처음 한 번만 불러오고 이후에는 재사용합니다.
-    """
+    """한국어 분석기 Kiwi를 한 번만 불러옵니다."""
     return Kiwi()
 
 
 @st.cache_resource
-def load_japanese_tagger() -> Tagger:
-    """
-    fugashi와 unidic-lite를 이용한 일본어 형태소 분석기를 불러옵니다.
-    """
-    return Tagger(f"-d {DICDIR}")
+def load_sudachi():
+    """일본어 분석기 SudachiPy를 한 번만 불러옵니다."""
+    return dictionary.Dictionary().create()
 
 
-# Kiwi 품사 태그를 초보자가 읽기 쉬운 한국어 명칭으로 바꿉니다.
-POS_NAMES = {
-    "NNG": "일반 명사",
-    "NNP": "고유 명사",
-    "NNB": "의존 명사",
-    "NR": "수사",
-    "NP": "대명사",
-    "VV": "동사",
-    "VA": "형용사",
-    "VX": "보조 용언",
-    "VCP": "긍정 지정사",
-    "VCN": "부정 지정사",
-    "MM": "관형사",
-    "MAG": "일반 부사",
-    "MAJ": "접속 부사",
-    "IC": "감탄사",
-    "JKS": "주격 조사",
-    "JKC": "보격 조사",
-    "JKG": "관형격 조사",
-    "JKO": "목적격 조사",
-    "JKB": "부사격 조사",
-    "JKV": "호격 조사",
-    "JKQ": "인용격 조사",
-    "JX": "보조사",
-    "JC": "접속 조사",
-    "EP": "선어말 어미",
-    "EF": "종결 어미",
-    "EC": "연결 어미",
-    "ETN": "명사형 전성 어미",
-    "ETM": "관형형 전성 어미",
-    "XPN": "접두사",
-    "XSN": "명사 파생 접미사",
-    "XSV": "동사 파생 접미사",
-    "XSA": "형용사 파생 접미사",
-    "XR": "어근",
-    "SF": "마침표·물음표·느낌표",
-    "SP": "쉼표·가운뎃점·콜론",
-    "SS": "괄호·따옴표",
-    "SSO": "여는 괄호·따옴표",
-    "SSC": "닫는 괄호·따옴표",
-    "SE": "줄임표",
-    "SO": "붙임표",
-    "SW": "기타 기호",
-    "SL": "영문",
-    "SH": "한자",
-    "SN": "숫자",
-    "W_URL": "URL",
-    "W_EMAIL": "이메일",
-    "W_HASHTAG": "해시태그",
-    "W_MENTION": "멘션",
-    "W_SERIAL": "일련번호",
-    "Z_CODA": "덧붙은 받침",
+# Kiwi 품사 태그를 비전공자가 읽기 쉬운 한국어 명칭으로 바꿉니다.
+KOREAN_POS_NAMES = {
+    "NNG": "일반 명사", "NNP": "고유 명사", "NNB": "의존 명사",
+    "NR": "수사", "NP": "대명사", "VV": "동사", "VA": "형용사",
+    "VX": "보조 용언", "VCP": "긍정 지정사", "VCN": "부정 지정사",
+    "MM": "관형사", "MAG": "일반 부사", "MAJ": "접속 부사",
+    "IC": "감탄사", "JKS": "주격 조사", "JKC": "보격 조사",
+    "JKG": "관형격 조사", "JKO": "목적격 조사", "JKB": "부사격 조사",
+    "JKV": "호격 조사", "JKQ": "인용격 조사", "JX": "보조사",
+    "JC": "접속 조사", "EP": "선어말 어미", "EF": "종결 어미",
+    "EC": "연결 어미", "ETN": "명사형 전성 어미", "ETM": "관형형 전성 어미",
+    "XPN": "접두사", "XSN": "명사 파생 접미사", "XSV": "동사 파생 접미사",
+    "XSA": "형용사 파생 접미사", "XR": "어근",
+    "SF": "마침표·물음표·느낌표", "SP": "쉼표·가운뎃점·콜론",
+    "SS": "괄호·따옴표", "SSO": "여는 괄호·따옴표", "SSC": "닫는 괄호·따옴표",
+    "SE": "줄임표", "SO": "붙임표", "SW": "기타 기호",
+    "SL": "영문", "SH": "한자", "SN": "숫자",
+    "W_URL": "URL", "W_EMAIL": "이메일", "W_HASHTAG": "해시태그",
+    "W_MENTION": "멘션", "W_SERIAL": "일련번호", "Z_CODA": "덧붙은 받침",
     "USER0": "사용자 정의어",
 }
 
 
-# UniDic 일본어 품사명을 앱에서 사용하는 한국어 명칭으로 바꿉니다.
-JAPANESE_POS_NAMES = {
-    "名詞": "일반 명사",
-    "代名詞": "대명사",
-    "動詞": "동사",
-    "形容詞": "형용사",
-    "形状詞": "형상사",
-    "連体詞": "관형사",
-    "副詞": "일반 부사",
-    "接続詞": "접속사",
-    "感動詞": "감탄사",
-    "助詞": "조사",
-    "助動詞": "조동사",
-    "接頭辞": "접두사",
-    "接尾辞": "접미사",
-    "記号": "기타 기호",
-    "補助記号": "기타 기호",
-    "空白": "공백",
-}
-
-JAPANESE_NOUN_DETAIL_NAMES = {
-    "固有名詞": "고유 명사",
-    "数詞": "수사",
-    "普通名詞": "일반 명사",
-}
-
-JAPANESE_PARTICLE_NAMES = {
-    "格助詞": "격조사",
-    "係助詞": "계조사",
-    "副助詞": "부조사",
-    "接続助詞": "접속 조사",
-    "終助詞": "종조사",
-    "準体助詞": "준체조사",
-}
-
-JAPANESE_SYMBOL_NAMES = {
-    "句点": "마침표·물음표·느낌표",
-    "読点": "쉼표·가운뎃점·콜론",
-    "括弧開": "여는 괄호·따옴표",
-    "括弧閉": "닫는 괄호·따옴표",
-    "一般": "기타 기호",
-    "ＡＡ": "기타 기호",
-}
-
-# 히라가나 또는 가타카나가 포함되면 일본어 댓글로 판단합니다.
-JAPANESE_KANA_PATTERN = re.compile(r"[\u3040-\u30ff\uff66-\uff9f]")
-
-
-# 유니코드의 대표적인 이모지 범위를 검사합니다.
 EMOJI_PATTERN = re.compile(
     "["
-    "\U0001F1E6-\U0001F1FF"
-    "\U0001F300-\U0001F5FF"
-    "\U0001F600-\U0001F64F"
-    "\U0001F680-\U0001F6FF"
-    "\U0001F700-\U0001F77F"
-    "\U0001F780-\U0001F7FF"
-    "\U0001F800-\U0001F8FF"
-    "\U0001F900-\U0001F9FF"
-    "\U0001FA00-\U0001FAFF"
-    "\u2600-\u26FF"
-    "\u2700-\u27BF"
+    "\\U0001F1E6-\\U0001F1FF"
+    "\\U0001F300-\\U0001F5FF"
+    "\\U0001F600-\\U0001F64F"
+    "\\U0001F680-\\U0001F6FF"
+    "\\U0001F700-\\U0001F77F"
+    "\\U0001F780-\\U0001F7FF"
+    "\\U0001F800-\\U0001F8FF"
+    "\\U0001F900-\\U0001F9FF"
+    "\\U0001FA00-\\U0001FAFF"
+    "\\u2600-\\u26FF"
+    "\\u2700-\\u27BF"
     "]"
 )
-
-# 이모지 조합에 붙는 변형 선택자와 피부색 문자를 함께 처리합니다.
 EMOJI_SEQUENCE_PATTERN = re.compile(
-    r"(?:"
-    + EMOJI_PATTERN.pattern
-    + r")(?:[\uFE0F\u200D\U0001F3FB-\U0001F3FF]*"
-    + EMOJI_PATTERN.pattern
-    + r")*"
+    r"(?:" + EMOJI_PATTERN.pattern + r")(?:[\\uFE0F\\u200D\\U0001F3FB-\\U0001F3FF]*"
+    + EMOJI_PATTERN.pattern + r")*"
 )
+JAPANESE_PATTERN = re.compile(r"[ぁ-ゖァ-ヺ一-龯々〆ヵヶ]")
 
 
 def make_korean_base_form(form: str, tag: str) -> str:
-    """
-    Kiwi가 분리한 한국어 용언 어간에는 사전형 어미 '다'를 붙입니다.
-    영어는 소문자로 통일하고, 나머지는 분석된 형태를 유지합니다.
-    """
     if tag.startswith(("VV", "VA", "VX", "VCP", "VCN")):
         return f"{form}다"
-
     if tag == "SL":
         return form.lower()
-
     return form
 
 
-def get_japanese_feature(word, name: str, default: str = "") -> str:
-    """
-    fugashi의 UniDic 특성값을 버전 차이에 안전하게 읽습니다.
-    """
-    value = getattr(word.feature, name, default)
-    if value in (None, "", "*"):
-        return default
-    return str(value)
+def map_japanese_pos(pos_tuple: tuple[str, ...], surface: str) -> str:
+    """Sudachi의 일본어 품사를 앱의 공통 한국어 품사명으로 변환합니다."""
+    major = pos_tuple[0] if pos_tuple else ""
+    sub1 = pos_tuple[1] if len(pos_tuple) > 1 else ""
+
+    if major == "名詞":
+        if sub1 == "固有名詞":
+            return "고유 명사"
+        if sub1 == "数詞":
+            return "수사"
+        return "일반 명사"
+    if major == "代名詞":
+        return "대명사"
+    if major == "動詞":
+        return "동사"
+    if major == "形容詞":
+        return "형용사"
+    if major == "形状詞":
+        return "형용사"
+    if major == "連体詞":
+        return "관형사"
+    if major == "副詞":
+        return "일반 부사"
+    if major == "接続詞":
+        return "접속 부사"
+    if major == "感動詞":
+        return "감탄사"
+    if major == "助詞":
+        return "조사"
+    if major == "助動詞":
+        return "보조 용언"
+    if major in {"接頭辞"}:
+        return "접두사"
+    if major in {"接尾辞"}:
+        return "명사 파생 접미사"
+    if major == "補助記号":
+        if surface in {"。", "！", "!", "？", "?"}:
+            return "마침표·물음표·느낌표"
+        if surface in {"、", ",", "・", ":", ";"}:
+            return "쉼표·가운뎃점·콜론"
+        if surface in {"…", "‥"}:
+            return "줄임표"
+        if surface in {"（", "）", "(", ")", "「", "」", "『", "』", "\"", "'"}:
+            return "괄호·따옴표"
+        return "기타 기호"
+    if major == "記号":
+        return "기타 기호"
+    if major == "空白":
+        return "공백"
+    if re.fullmatch(r"[A-Za-z]+", surface):
+        return "영문"
+    if re.fullmatch(r"[0-9０-９]+", surface):
+        return "숫자"
+    return "기타"
 
 
-def get_japanese_pos(word) -> str:
-    """
-    UniDic의 대분류·중분류를 앱의 세부 품사명으로 변환합니다.
-    """
-    pos1 = get_japanese_feature(word, "pos1", "기타")
-    pos2 = get_japanese_feature(word, "pos2", "")
-
-    if pos1 == "名詞":
-        return JAPANESE_NOUN_DETAIL_NAMES.get(pos2, "일반 명사")
-
-    if pos1 == "助詞":
-        return JAPANESE_PARTICLE_NAMES.get(pos2, "조사")
-
-    if pos1 in {"記号", "補助記号"}:
-        return JAPANESE_SYMBOL_NAMES.get(pos2, "기타 기호")
-
-    return JAPANESE_POS_NAMES.get(pos1, pos1)
-
-
-def get_japanese_base_form(word) -> str:
-    """
-    일본어 토큰의 UniDic 기본형(lemma)을 반환합니다.
-    기본형이 없으면 화면에 나타난 형태를 사용합니다.
-    """
-    surface = str(word.surface).strip()
-    lemma = get_japanese_feature(word, "lemma", surface)
-
-    if re.fullmatch(r"[A-Za-z]+", lemma):
-        return lemma.lower()
-
-    return lemma
-
-
-def add_emoji_rows(form: str, rows: list[dict]) -> str:
-    """
-    문자열 안의 이모지를 별도 행으로 추가하고 나머지 문자열을 반환합니다.
-    """
+def append_emoji_rows(rows: list[dict], form: str) -> str:
+    """토큰 안의 이모지를 별도 행으로 기록하고 남은 문자열을 반환합니다."""
     emoji_items = EMOJI_SEQUENCE_PATTERN.findall(form)
-
     for emoji_text in emoji_items:
-        rows.append(
-            {
-                "단어": emoji_text,
-                "품사": "이모지",
-                "기본형": emoji_text,
-            }
-        )
-
+        rows.append({"단어": emoji_text, "품사": "이모지", "기본형": emoji_text})
     return EMOJI_SEQUENCE_PATTERN.sub("", form).strip()
 
 
-def analyze_korean_text(text: str, kiwi: Kiwi, rows: list[dict]) -> None:
-    """
-    한국어 또는 영어 중심 댓글을 Kiwi로 분석합니다.
-    """
+def analyze_korean_text(text: str, rows: list[dict]) -> None:
+    kiwi = load_kiwi()
     for token in kiwi.tokenize(text):
         form = token.form.strip()
         tag = token.tag
-
         if not form:
             continue
-
-        remaining = add_emoji_rows(form, rows)
+        remaining = append_emoji_rows(rows, form)
         if not remaining:
             continue
-
-        display_form = remaining.lower() if tag == "SL" else remaining
-
-        rows.append(
-            {
-                "단어": display_form,
-                "품사": POS_NAMES.get(tag, tag),
-                "기본형": make_korean_base_form(remaining, tag),
-            }
-        )
+        display_form = form.lower() if tag == "SL" else form
+        rows.append({
+            "단어": display_form,
+            "품사": KOREAN_POS_NAMES.get(tag, tag),
+            "기본형": make_korean_base_form(form, tag),
+        })
 
 
-def analyze_japanese_text(text: str, tagger: Tagger, rows: list[dict]) -> None:
-    """
-    일본어 댓글을 fugashi와 UniDic으로 분석합니다.
-    """
-    for word in tagger(text):
-        form = str(word.surface).strip()
-
+def analyze_japanese_text(text: str, rows: list[dict]) -> None:
+    sudachi = load_sudachi()
+    for morpheme in sudachi.tokenize(text, tokenizer.Tokenizer.SplitMode.B):
+        form = morpheme.surface().strip()
         if not form:
             continue
-
-        remaining = add_emoji_rows(form, rows)
+        remaining = append_emoji_rows(rows, form)
         if not remaining:
             continue
-
-        pos_name = get_japanese_pos(word)
-
-        # 공백은 분석 결과에서 제외합니다.
+        pos_name = map_japanese_pos(morpheme.part_of_speech(), form)
         if pos_name == "공백":
             continue
-
-        display_form = (
-            remaining.lower()
-            if re.fullmatch(r"[A-Za-z]+", remaining)
-            else remaining
-        )
-
-        base_form = get_japanese_base_form(word)
-
-        rows.append(
-            {
-                "단어": display_form,
-                "품사": pos_name,
-                "기본형": base_form,
-            }
-        )
+        base_form = morpheme.dictionary_form()
+        if not base_form or base_form == "*":
+            base_form = form
+        if pos_name == "영문":
+            form = form.lower()
+            base_form = base_form.lower()
+        rows.append({"단어": form, "품사": pos_name, "기본형": base_form})
 
 
-def choose_analyzer(text: str, mode: str) -> str:
-    """
-    사용자가 선택한 모드와 댓글 문자열을 기준으로 분석기를 정합니다.
-    """
-    if mode == "한국어":
-        return "korean"
-
-    if mode == "일본어":
-        return "japanese"
-
-    if JAPANESE_KANA_PATTERN.search(text):
-        return "japanese"
-
-    return "korean"
-
-
-def analyze_comments(
-    comment_series: pd.Series,
-    mode: str,
-) -> pd.DataFrame:
-    """
-    한국어·일본어 댓글을 분석하여 형태소·빈도수·품사·기본형을 집계합니다.
-    """
-    kiwi = load_kiwi()
-    japanese_tagger = load_japanese_tagger()
+def analyze_comments(comment_series: pd.Series) -> pd.DataFrame:
+    """일본어 문자가 있는 댓글은 SudachiPy, 나머지는 Kiwi로 분석합니다."""
     rows = []
-
     for text in comment_series:
         text = str(text)
-        analyzer = choose_analyzer(text, mode)
-
-        if analyzer == "japanese":
-            analyze_japanese_text(text, japanese_tagger, rows)
+        if JAPANESE_PATTERN.search(text):
+            analyze_japanese_text(text, rows)
         else:
-            analyze_korean_text(text, kiwi, rows)
+            analyze_korean_text(text, rows)
 
     if not rows:
-        return pd.DataFrame(
-            columns=["단어", "빈도수", "품사", "기본형"]
-        )
+        return pd.DataFrame(columns=["단어", "빈도수", "품사", "기본형"])
 
     token_df = pd.DataFrame(rows)
-
     result_df = (
-        token_df.groupby(
-            ["단어", "품사", "기본형"],
-            as_index=False,
-            dropna=False,
-        )
+        token_df.groupby(["단어", "품사", "기본형"], as_index=False, dropna=False)
         .size()
         .rename(columns={"size": "빈도수"})
-        .sort_values(
-            ["빈도수", "단어", "품사"],
-            ascending=[False, True, True],
-        )
+        .sort_values(["빈도수", "단어", "품사"], ascending=[False, True, True])
         .reset_index(drop=True)
     )
-
     return result_df[["단어", "빈도수", "품사", "기본형"]]
 
 
 @st.cache_data(show_spinner=False)
-def cached_analyze_comments(
-    comment_tuple: tuple[str, ...],
-    mode: str,
-) -> pd.DataFrame:
-    """
-    같은 댓글과 같은 언어 설정을 다시 분석할 때 결과를 재사용합니다.
-    """
-    return analyze_comments(
-        pd.Series(comment_tuple),
-        mode,
-    )
+def cached_analyze_comments(comment_tuple: tuple[str, ...]) -> pd.DataFrame:
+    return analyze_comments(pd.Series(comment_tuple))
 
 
-with st.spinner("한국어·일본어 댓글을 형태소 분석하는 중입니다..."):
-    lexical_df = cached_analyze_comments(
-        tuple(comments_df["댓글"].tolist()),
-        analysis_mode,
-    )
+with st.spinner("한국어·일본어 댓글 전체를 형태소 분석하는 중입니다..."):
+    lexical_df = cached_analyze_comments(tuple(comments_df["댓글"].tolist()))
 
 
 # ------------------------------------------------------------
@@ -636,28 +458,22 @@ if lexical_df.empty:
     st.warning("형태소 분석 결과가 없습니다.")
     st.stop()
 
-result_col1, result_col2 = st.columns([1, 1])
-
+result_col1, result_col2 = st.columns(2)
 with result_col1:
     st.metric("형태소 종류 (Type)", f"{len(lexical_df):,}개")
-
 with result_col2:
     st.metric("전체 출현 형태소 (Token)", f"{lexical_df['빈도수'].sum():,}개")
 
 st.caption(
-    "형태소는 형태소 분석기가 나눈 최소 분석 단위입니다. "
-    "Type은 서로 다른 형태소 항목의 수이고, Token은 중복을 포함한 전체 출현 횟수입니다."
+    "일본어 문자가 포함된 댓글은 SudachiPy B 모드로, 그 밖의 댓글은 Kiwi로 분석합니다. "
+    "Type은 서로 다른 형태소 항목 수이고, Token은 중복을 포함한 전체 출현 횟수입니다."
 )
 
-csv_data = lexical_df.to_csv(
-    index=False,
-    encoding="utf-8-sig",
-).encode("utf-8-sig")
-
+csv_data = lexical_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
 st.download_button(
     "형태소 분석 결과 CSV 다운로드",
     data=csv_data,
-    file_name="youtube_comment_korean_japanese_lexical_analysis.csv",
+    file_name="youtube_comment_lexical_analysis.csv",
     mime="text/csv",
     use_container_width=True,
 )
@@ -670,11 +486,7 @@ with st.expander("형태소 분석 표 보기", expanded=False):
         height=500,
         column_config={
             "단어": st.column_config.TextColumn("형태소", width="medium"),
-            "빈도수": st.column_config.NumberColumn(
-                "빈도수",
-                format="%d",
-                width="small",
-            ),
+            "빈도수": st.column_config.NumberColumn("빈도수", format="%d", width="small"),
             "품사": st.column_config.TextColumn("품사", width="medium"),
             "기본형": st.column_config.TextColumn("기본형", width="medium"),
         },
@@ -682,12 +494,143 @@ with st.expander("형태소 분석 표 보기", expanded=False):
 
 
 # ------------------------------------------------------------
-# 5. 출현 빈도 분석
+# 5. 품사 분석
 # ------------------------------------------------------------
 st.markdown(
     """
     <div class="section-label">
         <span class="section-number">2</span>
+        품사 분석
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.caption(
+    "큰 품사 범주를 먼저 고른 뒤 세부 품사를 선택할 수 있습니다. "
+    "선택한 범주의 단어별 빈도와 전체 출현 빈도를 함께 보여줍니다."
+)
+
+POS_GROUPS = {
+    "명사": {"일반 명사", "고유 명사", "의존 명사"},
+    "대명사·수사": {"대명사", "수사"},
+    "동사": {"동사", "보조 용언", "긍정 지정사", "부정 지정사"},
+    "형용사": {"형용사"},
+    "관형사": {"관형사"},
+    "부사": {"일반 부사", "접속 부사"},
+    "감탄사": {"감탄사"},
+    "조사": {"조사", "주격 조사", "보격 조사", "관형격 조사", "목적격 조사", "부사격 조사", "호격 조사", "인용격 조사", "보조사", "접속 조사"},
+    "어미": {"선어말 어미", "종결 어미", "연결 어미", "명사형 전성 어미", "관형형 전성 어미"},
+    "접사·어근": {"접두사", "명사 파생 접미사", "동사 파생 접미사", "형용사 파생 접미사", "어근", "덧붙은 받침"},
+    "영문": {"영문"},
+    "숫자": {"숫자"},
+    "이모지": {"이모지"},
+    "문장부호": {"마침표·물음표·느낌표", "쉼표·가운뎃점·콜론", "괄호·따옴표", "여는 괄호·따옴표", "닫는 괄호·따옴표", "줄임표", "붙임표"},
+    "기타 기호": {"기타 기호"},
+    "기타": {"한자", "URL", "이메일", "해시태그", "멘션", "일련번호", "사용자 정의어", "기타"},
+}
+
+existing_pos = set(lexical_df["품사"].dropna().astype(str))
+available_pos_groups = [
+    group_name for group_name, detailed_pos in POS_GROUPS.items()
+    if existing_pos.intersection(detailed_pos)
+]
+
+if not available_pos_groups:
+    st.info("현재 분석 결과에서 선택할 수 있는 품사를 찾지 못했습니다.")
+else:
+    selection_col1, selection_col2, selection_col3 = st.columns([1, 1, 1])
+    with selection_col1:
+        selected_pos_group = st.selectbox("품사 범주", available_pos_groups)
+
+    detailed_pos_options = sorted(existing_pos.intersection(POS_GROUPS[selected_pos_group]))
+    with selection_col2:
+        selected_detailed_pos = st.selectbox("세부 품사", ["전체"] + detailed_pos_options)
+    with selection_col3:
+        pos_top_n = st.number_input(
+            "표시할 상위 단어 수",
+            min_value=5,
+            max_value=200,
+            value=20,
+            step=5,
+            key="pos_top_n",
+        )
+
+    selected_pos_set = set(detailed_pos_options) if selected_detailed_pos == "전체" else {selected_detailed_pos}
+    pos_df = lexical_df[lexical_df["품사"].isin(selected_pos_set)].copy()
+    pos_word_df = (
+        pos_df.groupby(["기본형", "품사"], as_index=False, dropna=False)["빈도수"]
+        .sum()
+        .sort_values(["빈도수", "기본형", "품사"], ascending=[False, True, True])
+        .rename(columns={"기본형": "단어"})
+        .reset_index(drop=True)
+    )
+
+    pos_metric_col1, pos_metric_col2, pos_metric_col3 = st.columns(3)
+    with pos_metric_col1:
+        label = selected_pos_group if selected_detailed_pos == "전체" else selected_detailed_pos
+        st.metric("선택한 품사", label)
+    with pos_metric_col2:
+        st.metric("단어 종류 (Type)", f"{len(pos_word_df):,}개")
+    with pos_metric_col3:
+        st.metric("출현 빈도 합계 (Token)", f"{int(pos_word_df['빈도수'].sum()):,}회")
+
+    if pos_word_df.empty:
+        st.info("선택한 품사 범주에 해당하는 단어가 없습니다.")
+    else:
+        pos_display_df = pos_word_df.head(int(pos_top_n)).copy()
+        pos_counts = pos_display_df.groupby("단어")["품사"].transform("nunique")
+        pos_display_df["표시 단어"] = pos_display_df["단어"]
+        pos_display_df.loc[pos_counts > 1, "표시 단어"] = (
+            pos_display_df.loc[pos_counts > 1, "단어"] + " · " + pos_display_df.loc[pos_counts > 1, "품사"]
+        )
+
+        pos_list_col, pos_chart_col = st.columns([0.9, 1.6])
+        with pos_list_col:
+            st.dataframe(
+                pos_display_df[["단어", "빈도수", "품사"]],
+                use_container_width=True,
+                hide_index=True,
+                height=max(300, min(680, 42 * len(pos_display_df) + 38)),
+                column_config={
+                    "단어": st.column_config.TextColumn("단어", width="large"),
+                    "빈도수": st.column_config.NumberColumn("빈도수", format="%d", width="small"),
+                    "품사": st.column_config.TextColumn("세부 품사", width="medium"),
+                },
+            )
+        with pos_chart_col:
+            pos_chart_df = pos_display_df.iloc[::-1].copy()
+            pos_figure = px.bar(
+                pos_chart_df,
+                x="빈도수",
+                y="표시 단어",
+                orientation="h",
+                text="빈도수",
+                hover_data={"품사": True},
+            )
+            pos_figure.update_traces(marker_color="#7d8d4d", textposition="outside", cliponaxis=False)
+            pos_figure.update_layout(
+                height=max(430, 31 * len(pos_chart_df)),
+                margin=dict(l=10, r=45, t=20, b=20),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                xaxis_title="선택 품사의 출현 빈도수",
+                yaxis_title="단어",
+                yaxis_categoryorder="array",
+                yaxis_categoryarray=pos_chart_df["표시 단어"].tolist(),
+                font=dict(color="#24331f"),
+            )
+            pos_figure.update_xaxes(showgrid=True, gridcolor="rgba(125,141,77,0.16)")
+            st.plotly_chart(pos_figure, use_container_width=True, config={"displayModeBar": False})
+
+
+# ------------------------------------------------------------
+# 6. 출현 빈도 분석
+# ------------------------------------------------------------
+st.markdown(
+    """
+    <div class="section-label">
+        <span class="section-number">3</span>
         출현 빈도 분석
     </div>
     """,
@@ -695,7 +638,6 @@ st.markdown(
 )
 
 frequency_col1, frequency_col2 = st.columns([1, 2])
-
 with frequency_col1:
     top_n = st.number_input(
         "표시할 상위 단어 수",
@@ -703,108 +645,55 @@ with frequency_col1:
         max_value=min(200, max(5, len(lexical_df))),
         value=min(20, max(5, len(lexical_df))),
         step=5,
+        key="frequency_top_n",
     )
-
-    remove_symbols = st.checkbox(
-        "문장부호와 기타 기호 제외",
-        value=True,
-    )
-
+    remove_symbols = st.checkbox("문장부호와 기타 기호 제외", value=True)
 with frequency_col2:
     st.caption(
-        "이 영역에서는 형태소 분석 결과를 사용하되, 화면에는 기본형을 기준으로 한 "
-        "단어 목록으로 표시합니다. 영문 알파벳 한 글자 단어는 자동으로 제외합니다."
+        "전체 품사를 대상으로 기본형 기준 단어 빈도를 표시합니다. "
+        "영문 알파벳 한 글자 단어는 자동으로 제외합니다."
     )
 
-
 frequency_df = lexical_df.copy()
-
-# 영어 한 글자 단어를 제외합니다.
-one_letter_english = (
-    frequency_df["단어"].str.fullmatch(r"[A-Za-z]", na=False)
-)
+one_letter_english = frequency_df["단어"].str.fullmatch(r"[A-Za-z]", na=False)
 frequency_df = frequency_df[~one_letter_english]
 
 if remove_symbols:
     excluded_pos = {
-        "마침표·물음표·느낌표",
-        "쉼표·가운뎃점·콜론",
-        "괄호·따옴표",
-        "여는 괄호·따옴표",
-        "닫는 괄호·따옴표",
-        "줄임표",
-        "붙임표",
-        "기타 기호",
+        "마침표·물음표·느낌표", "쉼표·가운뎃점·콜론", "괄호·따옴표",
+        "여는 괄호·따옴표", "닫는 괄호·따옴표", "줄임표", "붙임표", "기타 기호",
     }
-    frequency_df = frequency_df[
-        ~frequency_df["품사"].isin(excluded_pos)
-    ]
+    frequency_df = frequency_df[~frequency_df["품사"].isin(excluded_pos)]
 
-# 같은 형태라도 품사가 다르면 서로 다른 분석 항목으로 유지합니다.
-# 예: "하/동사 파생 접미사"와 "하/형용사 파생 접미사"를 별도로 집계합니다.
 frequency_df = (
-    frequency_df.groupby(
-        ["단어", "품사", "기본형"],
-        as_index=False,
-        dropna=False,
-    )["빈도수"]
+    frequency_df.groupby(["단어", "품사", "기본형"], as_index=False, dropna=False)["빈도수"]
     .sum()
-    .sort_values(
-        ["빈도수", "단어", "품사"],
-        ascending=[False, True, True],
-    )
+    .sort_values(["빈도수", "단어", "품사"], ascending=[False, True, True])
     .head(int(top_n))
 )
 
-# 출현 빈도 분석에서는 기본형을 '단어'로 표시합니다.
-# 같은 기본형이 여러 품사로 나타나면 그래프에서 구분할 수 있도록 품사를 덧붙입니다.
 word_pos_counts = frequency_df.groupby("기본형")["품사"].transform("nunique")
 frequency_df["표시 단어"] = frequency_df["기본형"]
 frequency_df.loc[word_pos_counts > 1, "표시 단어"] = (
-    frequency_df.loc[word_pos_counts > 1, "기본형"]
-    + " · "
-    + frequency_df.loc[word_pos_counts > 1, "품사"]
+    frequency_df.loc[word_pos_counts > 1, "기본형"] + " · " + frequency_df.loc[word_pos_counts > 1, "품사"]
 )
 
 if frequency_df.empty:
     st.warning("현재 조건에 표시할 단어가 없습니다.")
 else:
     list_col, chart_col = st.columns([0.8, 1.7])
-
     with list_col:
-        frequency_table_df = frequency_df[
-            ["기본형", "빈도수", "품사", "단어"]
-        ].rename(
-            columns={
-                "기본형": "단어",
-                "단어": "분석된 형태소",
-            }
+        frequency_table_df = frequency_df[["기본형", "빈도수", "품사", "단어"]].rename(
+            columns={"기본형": "단어", "단어": "분석된 형태소"}
         )
-
         st.dataframe(
             frequency_table_df,
             use_container_width=True,
             hide_index=True,
             height=max(300, min(680, 42 * len(frequency_df) + 38)),
-            column_config={
-                "단어": st.column_config.TextColumn("단어", width="medium"),
-                "빈도수": st.column_config.NumberColumn(
-                    "빈도수",
-                    format="%d",
-                    width="small",
-                ),
-                "품사": st.column_config.TextColumn("품사", width="medium"),
-                "분석된 형태소": st.column_config.TextColumn(
-                    "분석된 형태소",
-                    width="medium",
-                ),
-            },
         )
-
     with chart_col:
-        # 그래프에서 빈도가 큰 단어가 위에 오도록 역순으로 전달합니다.
         chart_df = frequency_df.iloc[::-1].copy()
-
         figure = px.bar(
             chart_df,
             x="빈도수",
@@ -813,13 +702,7 @@ else:
             text="빈도수",
             hover_data={"품사": True},
         )
-
-        figure.update_traces(
-            marker_color="#7d8d4d",
-            textposition="outside",
-            cliponaxis=False,
-        )
-
+        figure.update_traces(marker_color="#7d8d4d", textposition="outside", cliponaxis=False)
         figure.update_layout(
             height=max(430, 31 * len(chart_df)),
             margin=dict(l=10, r=45, t=20, b=20),
@@ -831,256 +714,5 @@ else:
             yaxis_categoryarray=chart_df["표시 단어"].tolist(),
             font=dict(color="#24331f"),
         )
-
-        figure.update_xaxes(
-            showgrid=True,
-            gridcolor="rgba(125,141,77,0.16)",
-        )
-
-        st.plotly_chart(
-            figure,
-            use_container_width=True,
-            config={"displayModeBar": False},
-        )
-
-
-
-
-# ------------------------------------------------------------
-# 6. 품사 분석
-# ------------------------------------------------------------
-st.markdown(
-    """
-    <div class="section-label">
-        <span class="section-number">3</span>
-        품사 분석
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-st.caption(
-    "세부 품사명을 한꺼번에 나열하지 않고, 명사·동사·조사처럼 "
-    "큰 범주로 묶어 선택할 수 있습니다. 표에서는 실제 세부 품사도 함께 표시합니다."
-)
-
-# 형태소 분석기에 사용된 세부 품사를 비전공자가 고르기 쉬운 큰 범주로 묶습니다.
-POS_GROUPS = {
-    "명사": {
-        "일반 명사",
-        "고유 명사",
-        "의존 명사",
-    },
-    "대명사·수사": {
-        "대명사",
-        "수사",
-    },
-    "동사": {
-        "동사",
-        "보조 용언",
-        "긍정 지정사",
-        "부정 지정사",
-    },
-    "형용사": {
-        "형용사",
-        "형상사",
-    },
-    "관형사": {
-        "관형사",
-    },
-    "부사": {
-        "일반 부사",
-        "접속 부사",
-    },
-    "접속사": {
-        "접속사",
-    },
-    "감탄사": {
-        "감탄사",
-    },
-    "조사": {
-        "주격 조사",
-        "보격 조사",
-        "관형격 조사",
-        "목적격 조사",
-        "부사격 조사",
-        "호격 조사",
-        "인용격 조사",
-        "보조사",
-        "접속 조사",
-        "격조사",
-        "계조사",
-        "부조사",
-        "종조사",
-        "준체조사",
-        "조사",
-    },
-    "어미·조동사": {
-        "선어말 어미",
-        "종결 어미",
-        "연결 어미",
-        "명사형 전성 어미",
-        "관형형 전성 어미",
-        "조동사",
-    },
-    "접사·어근": {
-        "접두사",
-        "명사 파생 접미사",
-        "동사 파생 접미사",
-        "형용사 파생 접미사",
-        "접미사",
-        "어근",
-        "덧붙은 받침",
-    },
-    "영문": {
-        "영문",
-    },
-    "숫자": {
-        "숫자",
-    },
-    "이모지": {
-        "이모지",
-    },
-    "문장부호": {
-        "마침표·물음표·느낌표",
-        "쉼표·가운뎃점·콜론",
-        "괄호·따옴표",
-        "여는 괄호·따옴표",
-        "닫는 괄호·따옴표",
-        "줄임표",
-        "붙임표",
-    },
-    "기타 기호": {
-        "기타 기호",
-    },
-    "기타": {
-        "한자",
-        "URL",
-        "이메일",
-        "해시태그",
-        "멘션",
-        "일련번호",
-        "사용자 정의어",
-    },
-}
-
-# 실제 분석 결과에 존재하는 품사만 포함된 그룹을 선택지로 제공합니다.
-existing_pos = set(lexical_df["품사"].dropna().astype(str))
-available_pos_groups = [
-    group_name
-    for group_name, detailed_pos in POS_GROUPS.items()
-    if existing_pos.intersection(detailed_pos)
-]
-
-if not available_pos_groups:
-    st.info("현재 분석 결과에서 선택할 수 있는 품사를 찾지 못했습니다.")
-else:
-    selection_col1, selection_col2 = st.columns(2)
-
-    with selection_col1:
-        selected_pos_group = st.selectbox(
-            "품사 범주",
-            options=available_pos_groups,
-            index=0,
-            help="명사·동사·조사처럼 큰 품사 범주를 먼저 선택합니다.",
-        )
-
-    # 선택한 큰 범주 안에서 실제 데이터에 존재하는 세부 품사만 추립니다.
-    detailed_pos_options = sorted(
-        existing_pos.intersection(POS_GROUPS[selected_pos_group])
-    )
-
-    with selection_col2:
-        selected_detailed_pos = st.selectbox(
-            "세부 품사",
-            options=["전체"] + detailed_pos_options,
-            index=0,
-            help="전체를 선택하면 해당 범주의 모든 세부 품사를 함께 분석합니다.",
-        )
-
-    # '전체'를 선택하면 큰 범주 안의 모든 세부 품사를 사용합니다.
-    # 개별 세부 품사를 선택하면 해당 품사만 남깁니다.
-    if selected_detailed_pos == "전체":
-        selected_pos_set = set(detailed_pos_options)
-    else:
-        selected_pos_set = {selected_detailed_pos}
-
-    pos_df = lexical_df[
-        lexical_df["품사"].isin(selected_pos_set)
-    ].copy()
-
-    # 품사 분석 화면에서는 기본형을 단어로 표시합니다.
-    # 같은 기본형이라도 세부 품사가 다르면 별도의 단어 항목으로 유지합니다.
-    pos_word_df = (
-        pos_df.groupby(
-            ["기본형", "품사"],
-            as_index=False,
-            dropna=False,
-        )["빈도수"]
-        .sum()
-        .sort_values(
-            ["빈도수", "기본형", "품사"],
-            ascending=[False, True, True],
-        )
-        .rename(columns={"기본형": "단어"})
-        .reset_index(drop=True)
-    )
-
-    pos_metric_col1, pos_metric_col2, pos_metric_col3 = st.columns(3)
-
-    with pos_metric_col1:
-        selected_pos_label = (
-            selected_pos_group
-            if selected_detailed_pos == "전체"
-            else selected_detailed_pos
-        )
-
-        st.metric(
-            "선택한 품사",
-            selected_pos_label,
-        )
-
-    with pos_metric_col2:
-        st.metric(
-            "단어 종류 (Type)",
-            f"{len(pos_word_df):,}개",
-        )
-
-    with pos_metric_col3:
-        st.metric(
-            "출현 빈도 합계 (Token)",
-            f"{int(pos_word_df['빈도수'].sum()):,}회",
-        )
-
-    detailed_pos_found = sorted(pos_word_df["품사"].unique().tolist())
-
-    if detailed_pos_found:
-        st.caption(
-            "분석에 포함된 세부 품사: "
-            + ", ".join(detailed_pos_found)
-        )
-
-    if pos_word_df.empty:
-        st.info("선택한 품사 범주에 해당하는 단어가 없습니다.")
-    else:
-        st.dataframe(
-            pos_word_df[["단어", "빈도수", "품사"]],
-            use_container_width=True,
-            hide_index=True,
-            height=min(620, max(260, 42 * len(pos_word_df) + 38)),
-            column_config={
-                "단어": st.column_config.TextColumn(
-                    "단어",
-                    width="large",
-                ),
-                "빈도수": st.column_config.NumberColumn(
-                    "빈도수",
-                    format="%d",
-                    width="small",
-                ),
-                "품사": st.column_config.TextColumn(
-                    "세부 품사",
-                    width="medium",
-                ),
-            },
-        )
+        figure.update_xaxes(showgrid=True, gridcolor="rgba(125,141,77,0.16)")
+        st.plotly_chart(figure, use_container_width=True, config={"displayModeBar": False})
