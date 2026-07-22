@@ -831,6 +831,8 @@ if load_button:
                 comments,
                 columns=["작성자 ID", "작성 일시", "댓글", "좋아요"],
             )
+# 서브 페이지에서 사용할 수 있도록 댓글 데이터를 저장합니다.
+            st.session_state["comments_df"] = comments_df
 
             metric_col1, metric_col2 = st.columns(2)
 
