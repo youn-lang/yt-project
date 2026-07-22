@@ -387,19 +387,39 @@ st.markdown(
 
     @media (max-width: 820px) {
         .hero {
-            padding: 1.15rem 1rem;
+            padding: 1.1rem;
         }
 
+        .hero-grid {
+            grid-template-columns: 1.15fr 0.85fr;
+            gap: 0.7rem;
+        }
+
+        .visual-panel {
+            min-height: 145px;
+        }
+
+        .hero-title {
+            font-size: 1.8rem;
+        }
+
+        .hero-copy {
+            font-size: 0.88rem;
+            line-height: 1.45;
+        }
+    }
+
+    @media (max-width: 520px) {
         .hero-grid {
             grid-template-columns: 1fr;
         }
 
         .visual-panel {
-            min-height: 160px;
+            display: none;
         }
 
-        .hero-title {
-            font-size: 1.9rem;
+        .hero-copy {
+            margin-bottom: 0;
         }
     }
     </style>
@@ -545,7 +565,7 @@ with control_col1:
         "불러올 댓글 개수",
         options=list(range(50, 1001, 50)),
         index=1,
-        format_func=lambda number: f"최대 {number:,}개",
+        format_func=lambda number: f"{number:,}",
         help="50개부터 1,000개까지 50개 단위로 선택할 수 있습니다.",
         label_visibility="collapsed",
     )
@@ -553,7 +573,7 @@ with control_col1:
     st.markdown(
         """
             <p class="small-note">
-                최소 50개부터 최대 1,000개까지 50개 단위로 선택합니다.
+                50개부터 1,000개까지 50개 단위로 선택합니다.
             </p>
         </div>
         """,
