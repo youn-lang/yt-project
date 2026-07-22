@@ -4,7 +4,9 @@ from collections import Counter
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+from fugashi import Tagger
 from kiwipiepy import Kiwi
+from unidic_lite import DICDIR
 
 
 # ------------------------------------------------------------
@@ -64,7 +66,7 @@ st.markdown(
     }
 
     .page-hero::after {
-        content: "Aa  가나다  #  💬";
+        content: "Aa  가나다  日本語  💬";
         position: absolute;
         right: 1.5rem;
         top: 0.8rem;
@@ -170,7 +172,7 @@ st.markdown(
         <div class="page-kicker">LEXICAL ANALYSIS</div>
         <h1 class="page-title">어휘 분석</h1>
         <p class="page-copy">
-            수집한 댓글을 형태소 단위로 분석하고 빈도와 실제 사용 문맥을 확인합니다.
+            한국어·일본어·영어 댓글을 형태소 단위로 분석하고 어휘 빈도와 품사를 확인합니다.
         </p>
     </section>
     """,
@@ -235,6 +237,17 @@ with metric_col2:
     non_empty_count = comments_df["댓글"].str.strip().ne("").sum()
     st.metric("내용이 있는 댓글", f"{non_empty_count:,}개")
 
+analysis_mode = st.selectbox(
+    "형태소 분석 언어",
+    options=["자동 판별", "한국어", "일본어"],
+    index=0,
+    help=(
+        "자동 판별은 댓글에 일본어 가나가 포함되어 있으면 일본어 분석기를, "
+        "그 밖에는 한국어 분석기를 사용합니다. 일본어 댓글만 분석할 때는 "
+        "'일본어'를 직접 선택하면 한자만 있는 댓글도 일본어로 처리할 수 있습니다."
+    ),
+)
+
 
 # ------------------------------------------------------------
 # 3. 형태소 분석 준비
@@ -245,6 +258,14 @@ def load_kiwi() -> Kiwi:
     Kiwi 분석기는 처음 한 번만 불러오고 이후에는 재사용합니다.
     """
     return Kiwi()
+
+
+@st.cache_resource
+def load_japanese_tagger() -> Tagger:
+    """
+    fugashi와 unidic-lite를 이용한 일본어 형태소 분석기를 불러옵니다.
+    """
+    return Tagger(f"-d {DICDIR}")
 
 
 # Kiwi 품사 태그를 초보자가 읽기 쉬운 한국어 명칭으로 바꿉니다.
@@ -303,6 +324,54 @@ POS_NAMES = {
 }
 
 
+# UniDic 일본어 품사명을 앱에서 사용하는 한국어 명칭으로 바꿉니다.
+JAPANESE_POS_NAMES = {
+    "名詞": "일반 명사",
+    "代名詞": "대명사",
+    "動詞": "동사",
+    "形容詞": "형용사",
+    "形状詞": "형상사",
+    "連体詞": "관형사",
+    "副詞": "일반 부사",
+    "接続詞": "접속사",
+    "感動詞": "감탄사",
+    "助詞": "조사",
+    "助動詞": "조동사",
+    "接頭辞": "접두사",
+    "接尾辞": "접미사",
+    "記号": "기타 기호",
+    "補助記号": "기타 기호",
+    "空白": "공백",
+}
+
+JAPANESE_NOUN_DETAIL_NAMES = {
+    "固有名詞": "고유 명사",
+    "数詞": "수사",
+    "普通名詞": "일반 명사",
+}
+
+JAPANESE_PARTICLE_NAMES = {
+    "格助詞": "격조사",
+    "係助詞": "계조사",
+    "副助詞": "부조사",
+    "接続助詞": "접속 조사",
+    "終助詞": "종조사",
+    "準体助詞": "준체조사",
+}
+
+JAPANESE_SYMBOL_NAMES = {
+    "句点": "마침표·물음표·느낌표",
+    "読点": "쉼표·가운뎃점·콜론",
+    "括弧開": "여는 괄호·따옴표",
+    "括弧閉": "닫는 괄호·따옴표",
+    "一般": "기타 기호",
+    "ＡＡ": "기타 기호",
+}
+
+# 히라가나 또는 가타카나가 포함되면 일본어 댓글로 판단합니다.
+JAPANESE_KANA_PATTERN = re.compile(r"[\u3040-\u30ff\uff66-\uff9f]")
+
+
 # 유니코드의 대표적인 이모지 범위를 검사합니다.
 EMOJI_PATTERN = re.compile(
     "["
@@ -330,9 +399,9 @@ EMOJI_SEQUENCE_PATTERN = re.compile(
 )
 
 
-def make_base_form(form: str, tag: str) -> str:
+def make_korean_base_form(form: str, tag: str) -> str:
     """
-    Kiwi가 분리한 용언 어간에는 사전형 어미 '다'를 붙입니다.
+    Kiwi가 분리한 한국어 용언 어간에는 사전형 어미 '다'를 붙입니다.
     영어는 소문자로 통일하고, 나머지는 분석된 형태를 유지합니다.
     """
     if tag.startswith(("VV", "VA", "VX", "VCP", "VCN")):
@@ -344,52 +413,165 @@ def make_base_form(form: str, tag: str) -> str:
     return form
 
 
-def analyze_comments(comment_series: pd.Series) -> pd.DataFrame:
+def get_japanese_feature(word, name: str, default: str = "") -> str:
     """
-    모든 댓글을 분석하여 단어별 빈도수·품사·기본형을 집계합니다.
+    fugashi의 UniDic 특성값을 버전 차이에 안전하게 읽습니다.
+    """
+    value = getattr(word.feature, name, default)
+    if value in (None, "", "*"):
+        return default
+    return str(value)
+
+
+def get_japanese_pos(word) -> str:
+    """
+    UniDic의 대분류·중분류를 앱의 세부 품사명으로 변환합니다.
+    """
+    pos1 = get_japanese_feature(word, "pos1", "기타")
+    pos2 = get_japanese_feature(word, "pos2", "")
+
+    if pos1 == "名詞":
+        return JAPANESE_NOUN_DETAIL_NAMES.get(pos2, "일반 명사")
+
+    if pos1 == "助詞":
+        return JAPANESE_PARTICLE_NAMES.get(pos2, "조사")
+
+    if pos1 in {"記号", "補助記号"}:
+        return JAPANESE_SYMBOL_NAMES.get(pos2, "기타 기호")
+
+    return JAPANESE_POS_NAMES.get(pos1, pos1)
+
+
+def get_japanese_base_form(word) -> str:
+    """
+    일본어 토큰의 UniDic 기본형(lemma)을 반환합니다.
+    기본형이 없으면 화면에 나타난 형태를 사용합니다.
+    """
+    surface = str(word.surface).strip()
+    lemma = get_japanese_feature(word, "lemma", surface)
+
+    if re.fullmatch(r"[A-Za-z]+", lemma):
+        return lemma.lower()
+
+    return lemma
+
+
+def add_emoji_rows(form: str, rows: list[dict]) -> str:
+    """
+    문자열 안의 이모지를 별도 행으로 추가하고 나머지 문자열을 반환합니다.
+    """
+    emoji_items = EMOJI_SEQUENCE_PATTERN.findall(form)
+
+    for emoji_text in emoji_items:
+        rows.append(
+            {
+                "단어": emoji_text,
+                "품사": "이모지",
+                "기본형": emoji_text,
+            }
+        )
+
+    return EMOJI_SEQUENCE_PATTERN.sub("", form).strip()
+
+
+def analyze_korean_text(text: str, kiwi: Kiwi, rows: list[dict]) -> None:
+    """
+    한국어 또는 영어 중심 댓글을 Kiwi로 분석합니다.
+    """
+    for token in kiwi.tokenize(text):
+        form = token.form.strip()
+        tag = token.tag
+
+        if not form:
+            continue
+
+        remaining = add_emoji_rows(form, rows)
+        if not remaining:
+            continue
+
+        display_form = remaining.lower() if tag == "SL" else remaining
+
+        rows.append(
+            {
+                "단어": display_form,
+                "품사": POS_NAMES.get(tag, tag),
+                "기본형": make_korean_base_form(remaining, tag),
+            }
+        )
+
+
+def analyze_japanese_text(text: str, tagger: Tagger, rows: list[dict]) -> None:
+    """
+    일본어 댓글을 fugashi와 UniDic으로 분석합니다.
+    """
+    for word in tagger(text):
+        form = str(word.surface).strip()
+
+        if not form:
+            continue
+
+        remaining = add_emoji_rows(form, rows)
+        if not remaining:
+            continue
+
+        pos_name = get_japanese_pos(word)
+
+        # 공백은 분석 결과에서 제외합니다.
+        if pos_name == "공백":
+            continue
+
+        display_form = (
+            remaining.lower()
+            if re.fullmatch(r"[A-Za-z]+", remaining)
+            else remaining
+        )
+
+        base_form = get_japanese_base_form(word)
+
+        rows.append(
+            {
+                "단어": display_form,
+                "품사": pos_name,
+                "기본형": base_form,
+            }
+        )
+
+
+def choose_analyzer(text: str, mode: str) -> str:
+    """
+    사용자가 선택한 모드와 댓글 문자열을 기준으로 분석기를 정합니다.
+    """
+    if mode == "한국어":
+        return "korean"
+
+    if mode == "일본어":
+        return "japanese"
+
+    if JAPANESE_KANA_PATTERN.search(text):
+        return "japanese"
+
+    return "korean"
+
+
+def analyze_comments(
+    comment_series: pd.Series,
+    mode: str,
+) -> pd.DataFrame:
+    """
+    한국어·일본어 댓글을 분석하여 형태소·빈도수·품사·기본형을 집계합니다.
     """
     kiwi = load_kiwi()
+    japanese_tagger = load_japanese_tagger()
     rows = []
 
     for text in comment_series:
         text = str(text)
+        analyzer = choose_analyzer(text, mode)
 
-        # Kiwi가 반환하는 형태소를 기록합니다.
-        for token in kiwi.tokenize(text):
-            form = token.form.strip()
-            tag = token.tag
-
-            if not form:
-                continue
-
-            # 기호로 분석된 토큰 안에 이모지가 있으면 이모지로 분류합니다.
-            emoji_items = EMOJI_SEQUENCE_PATTERN.findall(form)
-
-            if emoji_items:
-                for emoji_text in emoji_items:
-                    rows.append(
-                        {
-                            "단어": emoji_text,
-                            "품사": "이모지",
-                            "기본형": emoji_text,
-                        }
-                    )
-
-                # 토큰 전체가 이모지인 경우 일반 기호 행은 추가하지 않습니다.
-                remaining = EMOJI_SEQUENCE_PATTERN.sub("", form).strip()
-                if not remaining:
-                    continue
-
-            # 영어는 대소문자 차이를 같은 단어로 집계합니다.
-            display_form = form.lower() if tag == "SL" else form
-
-            rows.append(
-                {
-                    "단어": display_form,
-                    "품사": POS_NAMES.get(tag, tag),
-                    "기본형": make_base_form(form, tag),
-                }
-            )
+        if analyzer == "japanese":
+            analyze_japanese_text(text, japanese_tagger, rows)
+        else:
+            analyze_korean_text(text, kiwi, rows)
 
     if not rows:
         return pd.DataFrame(
@@ -407,8 +589,8 @@ def analyze_comments(comment_series: pd.Series) -> pd.DataFrame:
         .size()
         .rename(columns={"size": "빈도수"})
         .sort_values(
-            ["빈도수", "단어"],
-            ascending=[False, True],
+            ["빈도수", "단어", "품사"],
+            ascending=[False, True, True],
         )
         .reset_index(drop=True)
     )
@@ -417,16 +599,23 @@ def analyze_comments(comment_series: pd.Series) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def cached_analyze_comments(comment_tuple: tuple[str, ...]) -> pd.DataFrame:
+def cached_analyze_comments(
+    comment_tuple: tuple[str, ...],
+    mode: str,
+) -> pd.DataFrame:
     """
-    같은 댓글을 다시 분석할 때 결과를 재사용합니다.
+    같은 댓글과 같은 언어 설정을 다시 분석할 때 결과를 재사용합니다.
     """
-    return analyze_comments(pd.Series(comment_tuple))
+    return analyze_comments(
+        pd.Series(comment_tuple),
+        mode,
+    )
 
 
-with st.spinner("댓글 전체를 형태소 분석하는 중입니다..."):
+with st.spinner("한국어·일본어 댓글을 형태소 분석하는 중입니다..."):
     lexical_df = cached_analyze_comments(
-        tuple(comments_df["댓글"].tolist())
+        tuple(comments_df["댓글"].tolist()),
+        analysis_mode,
     )
 
 
@@ -468,7 +657,7 @@ csv_data = lexical_df.to_csv(
 st.download_button(
     "형태소 분석 결과 CSV 다운로드",
     data=csv_data,
-    file_name="youtube_comment_lexical_analysis.csv",
+    file_name="youtube_comment_korean_japanese_lexical_analysis.csv",
     mime="text/csv",
     use_container_width=True,
 )
@@ -694,6 +883,7 @@ POS_GROUPS = {
     },
     "형용사": {
         "형용사",
+        "형상사",
     },
     "관형사": {
         "관형사",
@@ -701,6 +891,9 @@ POS_GROUPS = {
     "부사": {
         "일반 부사",
         "접속 부사",
+    },
+    "접속사": {
+        "접속사",
     },
     "감탄사": {
         "감탄사",
@@ -715,19 +908,27 @@ POS_GROUPS = {
         "인용격 조사",
         "보조사",
         "접속 조사",
+        "격조사",
+        "계조사",
+        "부조사",
+        "종조사",
+        "준체조사",
+        "조사",
     },
-    "어미": {
+    "어미·조동사": {
         "선어말 어미",
         "종결 어미",
         "연결 어미",
         "명사형 전성 어미",
         "관형형 전성 어미",
+        "조동사",
     },
     "접사·어근": {
         "접두사",
         "명사 파생 접미사",
         "동사 파생 접미사",
         "형용사 파생 접미사",
+        "접미사",
         "어근",
         "덧붙은 받침",
     },
