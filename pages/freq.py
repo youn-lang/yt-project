@@ -125,6 +125,15 @@ st.markdown(
         box-shadow: 0 8px 22px rgba(42, 58, 33, 0.08);
     }
 
+    [data-testid="stDataFrame"] {
+        min-width: 100%;
+    }
+
+    [data-testid="stDataFrame"] [role="columnheader"]:first-child,
+    [data-testid="stDataFrame"] [role="gridcell"]:first-child {
+        min-width: 140px;
+    }
+
     div.stButton > button,
     div[data-testid="stDownloadButton"] button {
         border-radius: 12px;
@@ -596,8 +605,8 @@ else:
             + 3
         )
 
-        # 단어 목록 영역을 조금 좁히고 그래프 영역을 더 넓게 배치합니다.
-        pos_list_col, pos_chart_col = st.columns([0.75, 1.75])
+        # 단어 목록 영역을 더 넓히고 그래프 영역은 조금 좁게 배치합니다.
+        pos_list_col, pos_chart_col = st.columns([1.2, 1.3])
 
         with pos_list_col:
             st.dataframe(
@@ -609,7 +618,7 @@ else:
                 column_config={
                     "단어": st.column_config.TextColumn(
                         "단어",
-                        width="small",
+                        width=None,
                     ),
                     "빈도수": st.column_config.NumberColumn(
                         "빈도수",
