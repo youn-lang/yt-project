@@ -1,5 +1,5 @@
 requests
-plotly
 kiwipiepy
-fugashi
-unidic-lite
+plotly
+sudachipy
+sudachidict-core
