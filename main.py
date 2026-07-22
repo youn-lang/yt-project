@@ -496,7 +496,14 @@ if "youtube_url" not in st.session_state:
     st.session_state.youtube_url = DEFAULT_URL
 
 if "analysis_language" not in st.session_state:
-    st.session_state.analysis_language = "한국어"
+    st.session_state["analysis_language"] = "한국어"
+
+# 메인 페이지의 selectbox가 사용할 임시 위젯 상태입니다.
+# 서브 페이지와 공유할 값은 analysis_language에 따로 보관합니다.
+if "_analysis_language_widget" not in st.session_state:
+    st.session_state["_analysis_language_widget"] = (
+        st.session_state["analysis_language"]
+    )
 
 st.markdown(
     """
@@ -515,8 +522,11 @@ with language_col:
     analysis_language = st.selectbox(
         "분석 언어",
         options=["한국어", "일본어", "영어"],
-        key="analysis_language",
-        help="댓글의 주된 언어를 선택합니다. 서브 페이지에서 이 언어에 맞는 분석기를 사용합니다.",
+        key="_analysis_language_widget",
+        help=(
+            "댓글의 주된 언어를 선택합니다. "
+            "서브 페이지에서 이 언어에 맞는 분석기를 사용합니다."
+        ),
     )
 
 with url_col:
@@ -831,6 +841,11 @@ if load_button:
             st.session_state["comments_df"] = comments_df
             st.session_state["video_id"] = video_id
             st.session_state["video_url"] = youtube_url
+
+            # 위젯용 키와 공유용 키를 분리해,
+            # 서브 페이지로 이동해도 선택한 언어가 유지되게 합니다.
+            st.session_state["analysis_language"] = analysis_language
+            st.session_state["analysis_language"] = analysis_language
 
             metric_col1, metric_col2 = st.columns(2)
 
