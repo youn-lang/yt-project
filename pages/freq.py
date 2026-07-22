@@ -545,19 +545,30 @@ if remove_symbols:
         ~frequency_df["품사"].isin(excluded_pos)
     ]
 
-# 같은 기본형과 품사를 하나로 합쳐 실제 어휘 빈도를 계산합니다.
+# 같은 형태라도 품사가 다르면 서로 다른 분석 항목으로 유지합니다.
+# 예: "하/동사 파생 접미사"와 "하/형용사 파생 접미사"를 별도로 집계합니다.
 frequency_df = (
     frequency_df.groupby(
-        ["기본형", "품사"],
+        ["단어", "품사", "기본형"],
         as_index=False,
+        dropna=False,
     )["빈도수"]
     .sum()
     .sort_values(
-        ["빈도수", "기본형"],
-        ascending=[False, True],
+        ["빈도수", "단어", "품사"],
+        ascending=[False, True, True],
     )
     .head(int(top_n))
-    .rename(columns={"기본형": "단어"})
+)
+
+# 표면형이 같고 품사만 다른 항목이 그래프에서 같은 라벨로 겹치지 않도록
+# "단어 · 품사" 형식의 표시용 라벨을 만듭니다.
+word_pos_counts = frequency_df.groupby("단어")["품사"].transform("nunique")
+frequency_df["표시 단어"] = frequency_df["단어"]
+frequency_df.loc[word_pos_counts > 1, "표시 단어"] = (
+    frequency_df.loc[word_pos_counts > 1, "단어"]
+    + " · "
+    + frequency_df.loc[word_pos_counts > 1, "품사"]
 )
 
 if frequency_df.empty:
@@ -567,7 +578,7 @@ else:
 
     with list_col:
         st.dataframe(
-            frequency_df[["단어", "빈도수", "품사"]],
+            frequency_df[["단어", "빈도수", "품사", "기본형"]],
             use_container_width=True,
             hide_index=True,
             height=max(300, min(680, 42 * len(frequency_df) + 38)),
@@ -580,7 +591,7 @@ else:
         figure = px.bar(
             chart_df,
             x="빈도수",
-            y="단어",
+            y="표시 단어",
             orientation="h",
             text="빈도수",
             hover_data={"품사": True},
@@ -599,6 +610,8 @@ else:
             plot_bgcolor="rgba(0,0,0,0)",
             xaxis_title="출현 빈도수",
             yaxis_title="",
+            yaxis_categoryorder="array",
+            yaxis_categoryarray=chart_df["표시 단어"].tolist(),
             font=dict(color="#24331f"),
         )
 
@@ -725,4 +738,3 @@ if search_text:
                     """,
                     unsafe_allow_html=True,
                 )
-
