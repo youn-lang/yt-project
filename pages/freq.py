@@ -236,32 +236,44 @@ if comments_df is None:
 
 comments_df["댓글"] = comments_df["댓글"].fillna("").astype(str)
 
-metric_col1, metric_col2 = st.columns(2)
+# ------------------------------------------------------------
+# 3. 분석 언어와 형태소 분석기 준비
+# ------------------------------------------------------------
+analysis_language = st.session_state.get("analysis_language")
 
-with metric_col1:
+if analysis_language not in {"한국어", "일본어", "영어"}:
+    st.warning(
+        "분석 언어 정보가 없습니다. 메인 페이지에서 분석 언어를 선택한 뒤 "
+        "댓글을 다시 불러와 주세요."
+    )
+    st.stop()
+
+language_metric_col1, language_metric_col2, language_metric_col3 = st.columns(3)
+
+with language_metric_col1:
+    st.metric("분석 언어", analysis_language)
+
+with language_metric_col2:
     st.metric("분석 대상 댓글", f"{len(comments_df):,}개")
 
-with metric_col2:
+with language_metric_col3:
     non_empty_count = comments_df["댓글"].str.strip().ne("").sum()
     st.metric("내용이 있는 댓글", f"{non_empty_count:,}개")
 
 
-# ------------------------------------------------------------
-# 3. 형태소 분석 준비
-# ------------------------------------------------------------
 @st.cache_resource
 def load_kiwi() -> Kiwi:
-    """한국어 분석기 Kiwi를 한 번만 불러옵니다."""
+    """한국어 형태소 분석기 Kiwi를 한 번만 불러옵니다."""
     return Kiwi()
 
 
 @st.cache_resource
 def load_sudachi():
-    """일본어 분석기 SudachiPy를 한 번만 불러옵니다."""
+    """일본어 형태소 분석기 SudachiPy를 한 번만 불러옵니다."""
     return dictionary.Dictionary().create()
 
 
-# Kiwi 품사 태그를 비전공자가 읽기 쉬운 한국어 명칭으로 바꿉니다.
+# Kiwi의 세부 품사 태그를 한국어 명칭으로 표시합니다.
 KOREAN_POS_NAMES = {
     "NNG": "일반 명사", "NNP": "고유 명사", "NNB": "의존 명사",
     "NR": "수사", "NP": "대명사", "VV": "동사", "VA": "형용사",
@@ -283,6 +295,26 @@ KOREAN_POS_NAMES = {
     "USER0": "사용자 정의어",
 }
 
+# 한국어 품사 화면의 큰 범주입니다.
+KOREAN_POS_GROUPS = {
+    "명사": {"NNG", "NNP", "NNB"},
+    "대명사·수사": {"NP", "NR"},
+    "동사": {"VV", "VX", "VCP", "VCN"},
+    "형용사": {"VA"},
+    "관형사": {"MM"},
+    "부사": {"MAG", "MAJ"},
+    "감탄사": {"IC"},
+    "조사": {"JKS", "JKC", "JKG", "JKO", "JKB", "JKV", "JKQ", "JX", "JC"},
+    "어미": {"EP", "EF", "EC", "ETN", "ETM"},
+    "접사·어근": {"XPN", "XSN", "XSV", "XSA", "XR", "Z_CODA"},
+    "영문": {"SL"},
+    "한자": {"SH"},
+    "숫자": {"SN"},
+    "문장부호": {"SF", "SP", "SS", "SSO", "SSC", "SE", "SO"},
+    "기타 기호": {"SW"},
+    "웹 표현": {"W_URL", "W_EMAIL", "W_HASHTAG", "W_MENTION", "W_SERIAL"},
+    "기타": {"USER0"},
+}
 
 EMOJI_PATTERN = re.compile(
     "["
@@ -303,7 +335,6 @@ EMOJI_SEQUENCE_PATTERN = re.compile(
     r"(?:" + EMOJI_PATTERN.pattern + r")(?:[\\uFE0F\\u200D\\U0001F3FB-\\U0001F3FF]*"
     + EMOJI_PATTERN.pattern + r")*"
 )
-JAPANESE_PATTERN = re.compile(r"[ぁ-ゖァ-ヺ一-龯々〆ヵヶ]")
 
 
 def make_korean_base_form(form: str, tag: str) -> str:
@@ -314,67 +345,33 @@ def make_korean_base_form(form: str, tag: str) -> str:
     return form
 
 
-def map_japanese_pos(pos_tuple: tuple[str, ...], surface: str) -> str:
-    """Sudachi의 일본어 품사를 앱의 공통 한국어 품사명으로 변환합니다."""
-    major = pos_tuple[0] if pos_tuple else ""
-    sub1 = pos_tuple[1] if len(pos_tuple) > 1 else ""
-
-    if major == "名詞":
-        if sub1 == "固有名詞":
-            return "고유 명사"
-        if sub1 == "数詞":
-            return "수사"
-        return "일반 명사"
-    if major == "代名詞":
-        return "대명사"
-    if major == "動詞":
-        return "동사"
-    if major == "形容詞":
-        return "형용사"
-    if major == "形状詞":
-        return "형용사"
-    if major == "連体詞":
-        return "관형사"
-    if major == "副詞":
-        return "일반 부사"
-    if major == "接続詞":
-        return "접속 부사"
-    if major == "感動詞":
-        return "감탄사"
-    if major == "助詞":
-        return "조사"
-    if major == "助動詞":
-        return "보조 용언"
-    if major in {"接頭辞"}:
-        return "접두사"
-    if major in {"接尾辞"}:
-        return "명사 파생 접미사"
-    if major == "補助記号":
-        if surface in {"。", "！", "!", "？", "?"}:
-            return "마침표·물음표·느낌표"
-        if surface in {"、", ",", "・", ":", ";"}:
-            return "쉼표·가운뎃점·콜론"
-        if surface in {"…", "‥"}:
-            return "줄임표"
-        if surface in {"（", "）", "(", ")", "「", "」", "『", "』", "\"", "'"}:
-            return "괄호·따옴표"
-        return "기타 기호"
-    if major == "記号":
-        return "기타 기호"
-    if major == "空白":
-        return "공백"
-    if re.fullmatch(r"[A-Za-z]+", surface):
-        return "영문"
-    if re.fullmatch(r"[0-9０-９]+", surface):
-        return "숫자"
+def korean_major_pos(tag: str) -> str:
+    """Kiwi 태그를 한국어 품사 대분류로 변환합니다."""
+    for group_name, tags in KOREAN_POS_GROUPS.items():
+        if tag in tags:
+            return group_name
     return "기타"
 
 
-def append_emoji_rows(rows: list[dict], form: str) -> str:
-    """토큰 안의 이모지를 별도 행으로 기록하고 남은 문자열을 반환합니다."""
-    emoji_items = EMOJI_SEQUENCE_PATTERN.findall(form)
-    for emoji_text in emoji_items:
-        rows.append({"단어": emoji_text, "품사": "이모지", "기본형": emoji_text})
+def japanese_detailed_pos(pos_tuple: tuple[str, ...]) -> str:
+    """Sudachi 품사 배열에서 의미 있는 앞부분을 세부 품사명으로 만듭니다."""
+    meaningful = [item for item in pos_tuple[:3] if item and item != "*"]
+    return "-".join(meaningful) if meaningful else "未分類"
+
+
+def append_emoji_rows(rows: list[dict], form: str, language: str) -> str:
+    """토큰 안의 이모지를 독립 항목으로 기록하고 남은 문자열을 반환합니다."""
+    for emoji_text in EMOJI_SEQUENCE_PATTERN.findall(form):
+        rows.append(
+            {
+                "언어": language,
+                "형태소": emoji_text,
+                "기본형": emoji_text,
+                "품사 범주": "이모지" if language != "일본어" else "絵文字",
+                "세부 품사": "이모지" if language != "일본어" else "絵文字",
+                "원래 품사": "EMOJI",
+            }
+        )
     return EMOJI_SEQUENCE_PATTERN.sub("", form).strip()
 
 
@@ -385,15 +382,22 @@ def analyze_korean_text(text: str, rows: list[dict]) -> None:
         tag = token.tag
         if not form:
             continue
-        remaining = append_emoji_rows(rows, form)
+
+        remaining = append_emoji_rows(rows, form, "한국어")
         if not remaining:
             continue
+
         display_form = form.lower() if tag == "SL" else form
-        rows.append({
-            "단어": display_form,
-            "품사": KOREAN_POS_NAMES.get(tag, tag),
-            "기본형": make_korean_base_form(form, tag),
-        })
+        rows.append(
+            {
+                "언어": "한국어",
+                "형태소": display_form,
+                "기본형": make_korean_base_form(form, tag),
+                "품사 범주": korean_major_pos(tag),
+                "세부 품사": KOREAN_POS_NAMES.get(tag, tag),
+                "원래 품사": tag,
+            }
+        )
 
 
 def analyze_japanese_text(text: str, rows: list[dict]) -> None:
@@ -402,52 +406,131 @@ def analyze_japanese_text(text: str, rows: list[dict]) -> None:
         form = morpheme.surface().strip()
         if not form:
             continue
-        remaining = append_emoji_rows(rows, form)
+
+        remaining = append_emoji_rows(rows, form, "일본어")
         if not remaining:
             continue
-        pos_name = map_japanese_pos(morpheme.part_of_speech(), form)
-        if pos_name == "공백":
+
+        pos_tuple = tuple(morpheme.part_of_speech())
+        major_pos = pos_tuple[0] if pos_tuple else "未分類"
+        detailed_pos = japanese_detailed_pos(pos_tuple)
+        original_pos = ",".join(pos_tuple)
+
+        # 공백은 분석 결과에서 제외합니다.
+        if major_pos == "空白":
             continue
+
         base_form = morpheme.dictionary_form()
         if not base_form or base_form == "*":
             base_form = form
-        if pos_name == "영문":
-            form = form.lower()
-            base_form = base_form.lower()
-        rows.append({"단어": form, "품사": pos_name, "기본형": base_form})
+
+        rows.append(
+            {
+                "언어": "일본어",
+                "형태소": form,
+                "기본형": base_form,
+                "품사 범주": major_pos,
+                "세부 품사": detailed_pos,
+                "원래 품사": original_pos,
+            }
+        )
 
 
-def analyze_comments(comment_series: pd.Series) -> pd.DataFrame:
-    """일본어 문자가 있는 댓글은 SudachiPy, 나머지는 Kiwi로 분석합니다."""
-    rows = []
+def analyze_english_text(text: str, rows: list[dict]) -> None:
+    """영어 선택 시 간단한 토큰화만 제공합니다."""
+    token_pattern = re.compile(r"[A-Za-z]+(?:['’-][A-Za-z]+)*|[0-9]+|[^\\w\\s]", re.UNICODE)
+    for token_text in token_pattern.findall(text):
+        if not token_text.strip():
+            continue
+
+        remaining = append_emoji_rows(rows, token_text, "영어")
+        if not remaining:
+            continue
+
+        if re.fullmatch(r"[A-Za-z]+(?:['’-][A-Za-z]+)*", token_text):
+            category = "영문 단어"
+            detail = "영문 단어"
+            base_form = token_text.lower()
+        elif re.fullmatch(r"[0-9]+", token_text):
+            category = "숫자"
+            detail = "숫자"
+            base_form = token_text
+        else:
+            category = "기호"
+            detail = "문장부호·기호"
+            base_form = token_text
+
+        rows.append(
+            {
+                "언어": "영어",
+                "형태소": token_text.lower() if category == "영문 단어" else token_text,
+                "기본형": base_form,
+                "품사 범주": category,
+                "세부 품사": detail,
+                "원래 품사": "SIMPLE_TOKENIZER",
+            }
+        )
+
+
+def analyze_comments(comment_series: pd.Series, language: str) -> pd.DataFrame:
+    """메인 페이지에서 선택한 언어의 분석기만 사용합니다."""
+    rows: list[dict] = []
+
     for text in comment_series:
         text = str(text)
-        if JAPANESE_PATTERN.search(text):
+        if language == "한국어":
+            analyze_korean_text(text, rows)
+        elif language == "일본어":
             analyze_japanese_text(text, rows)
         else:
-            analyze_korean_text(text, rows)
+            analyze_english_text(text, rows)
+
+    columns = [
+        "언어", "형태소", "빈도수", "품사 범주",
+        "세부 품사", "기본형", "원래 품사",
+    ]
 
     if not rows:
-        return pd.DataFrame(columns=["단어", "빈도수", "품사", "기본형"])
+        return pd.DataFrame(columns=columns)
 
     token_df = pd.DataFrame(rows)
     result_df = (
-        token_df.groupby(["단어", "품사", "기본형"], as_index=False, dropna=False)
+        token_df.groupby(
+            ["언어", "형태소", "품사 범주", "세부 품사", "기본형", "원래 품사"],
+            as_index=False,
+            dropna=False,
+        )
         .size()
         .rename(columns={"size": "빈도수"})
-        .sort_values(["빈도수", "단어", "품사"], ascending=[False, True, True])
+        .sort_values(
+            ["빈도수", "형태소", "품사 범주", "세부 품사"],
+            ascending=[False, True, True, True],
+        )
         .reset_index(drop=True)
     )
-    return result_df[["단어", "빈도수", "품사", "기본형"]]
+
+    return result_df[columns]
 
 
 @st.cache_data(show_spinner=False)
-def cached_analyze_comments(comment_tuple: tuple[str, ...]) -> pd.DataFrame:
-    return analyze_comments(pd.Series(comment_tuple))
+def cached_analyze_comments(
+    comment_tuple: tuple[str, ...],
+    language: str,
+) -> pd.DataFrame:
+    return analyze_comments(pd.Series(comment_tuple), language)
 
 
-with st.spinner("한국어·일본어 댓글 전체를 형태소 분석하는 중입니다..."):
-    lexical_df = cached_analyze_comments(tuple(comments_df["댓글"].tolist()))
+analyzer_name = {
+    "한국어": "Kiwi",
+    "일본어": "SudachiPy (SplitMode.B)",
+    "영어": "간단 영문 토크나이저",
+}[analysis_language]
+
+with st.spinner(f"{analyzer_name}로 댓글 전체를 분석하는 중입니다..."):
+    lexical_df = cached_analyze_comments(
+        tuple(comments_df["댓글"].tolist()),
+        analysis_language,
+    )
 
 
 # ------------------------------------------------------------
@@ -467,22 +550,34 @@ if lexical_df.empty:
     st.warning("형태소 분석 결과가 없습니다.")
     st.stop()
 
-result_col1, result_col2 = st.columns(2)
+result_col1, result_col2, result_col3 = st.columns(3)
 with result_col1:
     st.metric("형태소 종류 (Type)", f"{len(lexical_df):,}개")
 with result_col2:
-    st.metric("전체 출현 형태소 (Token)", f"{lexical_df['빈도수'].sum():,}개")
+    st.metric("전체 출현 형태소 (Token)", f"{int(lexical_df['빈도수'].sum()):,}개")
+with result_col3:
+    st.metric("사용 분석기", analyzer_name)
 
-st.caption(
-    "일본어 문자가 포함된 댓글은 SudachiPy B 모드로, 그 밖의 댓글은 Kiwi로 분석합니다. "
-    "Type은 서로 다른 형태소 항목 수이고, Token은 중복을 포함한 전체 출현 횟수입니다."
-)
+if analysis_language == "일본어":
+    st.caption(
+        "일본어 품사명은 SudachiPy가 반환한 일본어 분류 체계를 그대로 사용합니다. "
+        "'원래 품사' 열에는 Sudachi의 전체 품사 배열을 보존합니다."
+    )
+elif analysis_language == "한국어":
+    st.caption(
+        "한국어 품사 범주와 세부 품사는 Kiwi 태그를 한국어 문법 범주로 정리해 표시하며, "
+        "'원래 품사' 열에는 Kiwi 태그를 보존합니다."
+    )
+else:
+    st.caption(
+        "영어는 현재 간단 토큰화만 지원합니다. 정확한 영어 품사 분석기는 이후 단계에서 추가할 수 있습니다."
+    )
 
 csv_data = lexical_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
 st.download_button(
     "형태소 분석 결과 CSV 다운로드",
     data=csv_data,
-    file_name="youtube_comment_lexical_analysis.csv",
+    file_name=f"youtube_comment_lexical_analysis_{analysis_language}.csv",
     mime="text/csv",
     use_container_width=True,
 )
@@ -494,10 +589,13 @@ with st.expander("형태소 분석 표 보기", expanded=False):
         hide_index=True,
         height=500,
         column_config={
-            "단어": st.column_config.TextColumn("형태소", width="medium"),
+            "언어": st.column_config.TextColumn("언어", width="small"),
+            "형태소": st.column_config.TextColumn("형태소", width="medium"),
             "빈도수": st.column_config.NumberColumn("빈도수", format="%d", width="small"),
-            "품사": st.column_config.TextColumn("품사", width="medium"),
+            "품사 범주": st.column_config.TextColumn("품사 범주", width="medium"),
+            "세부 품사": st.column_config.TextColumn("세부 품사", width="large"),
             "기본형": st.column_config.TextColumn("기본형", width="medium"),
+            "원래 품사": st.column_config.TextColumn("원래 품사", width="large"),
         },
     )
 
@@ -515,46 +613,46 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.caption(
-    "큰 품사 범주를 먼저 고른 뒤 세부 품사를 선택할 수 있습니다. "
-    "선택한 범주의 단어별 빈도와 전체 출현 빈도를 함께 보여줍니다."
-)
+if analysis_language == "일본어":
+    st.caption(
+        "SudachiPy의 일본어 품사 대분류와 세부 품사를 그대로 선택합니다. "
+        "예: 名詞 → 名詞-普通名詞-一般."
+    )
+elif analysis_language == "한국어":
+    st.caption(
+        "한국어 품사 범주를 먼저 고른 뒤 Kiwi의 세부 품사를 선택합니다."
+    )
+else:
+    st.caption("현재 영어 분석에서는 영문 단어·숫자·기호 범주를 제공합니다.")
 
-POS_GROUPS = {
-    "명사": {"일반 명사", "고유 명사", "의존 명사"},
-    "대명사·수사": {"대명사", "수사"},
-    "동사": {"동사", "보조 용언", "긍정 지정사", "부정 지정사"},
-    "형용사": {"형용사"},
-    "관형사": {"관형사"},
-    "부사": {"일반 부사", "접속 부사"},
-    "감탄사": {"감탄사"},
-    "조사": {"조사", "주격 조사", "보격 조사", "관형격 조사", "목적격 조사", "부사격 조사", "호격 조사", "인용격 조사", "보조사", "접속 조사"},
-    "어미": {"선어말 어미", "종결 어미", "연결 어미", "명사형 전성 어미", "관형형 전성 어미"},
-    "접사·어근": {"접두사", "명사 파생 접미사", "동사 파생 접미사", "형용사 파생 접미사", "어근", "덧붙은 받침"},
-    "영문": {"영문"},
-    "숫자": {"숫자"},
-    "이모지": {"이모지"},
-    "문장부호": {"마침표·물음표·느낌표", "쉼표·가운뎃점·콜론", "괄호·따옴표", "여는 괄호·따옴표", "닫는 괄호·따옴표", "줄임표", "붙임표"},
-    "기타 기호": {"기타 기호"},
-    "기타": {"한자", "URL", "이메일", "해시태그", "멘션", "일련번호", "사용자 정의어", "기타"},
-}
-
-existing_pos = set(lexical_df["품사"].dropna().astype(str))
-available_pos_groups = [
-    group_name for group_name, detailed_pos in POS_GROUPS.items()
-    if existing_pos.intersection(detailed_pos)
-]
+available_pos_groups = sorted(lexical_df["품사 범주"].dropna().unique().tolist())
 
 if not available_pos_groups:
     st.info("현재 분석 결과에서 선택할 수 있는 품사를 찾지 못했습니다.")
 else:
-    selection_col1, selection_col2, selection_col3 = st.columns([1, 1, 1])
-    with selection_col1:
-        selected_pos_group = st.selectbox("품사 범주", available_pos_groups)
+    selection_col1, selection_col2, selection_col3 = st.columns([1, 1.25, 0.8])
 
-    detailed_pos_options = sorted(existing_pos.intersection(POS_GROUPS[selected_pos_group]))
+    with selection_col1:
+        selected_pos_group = st.selectbox(
+            "품사 범주",
+            available_pos_groups,
+            key="language_specific_pos_group",
+        )
+
+    detailed_pos_options = sorted(
+        lexical_df.loc[
+            lexical_df["품사 범주"] == selected_pos_group,
+            "세부 품사",
+        ].dropna().unique().tolist()
+    )
+
     with selection_col2:
-        selected_detailed_pos = st.selectbox("세부 품사", ["전체"] + detailed_pos_options)
+        selected_detailed_pos = st.selectbox(
+            "세부 품사",
+            ["전체"] + detailed_pos_options,
+            key="language_specific_detailed_pos",
+        )
+
     with selection_col3:
         pos_top_n = st.number_input(
             "표시할 상위 단어 수",
@@ -562,75 +660,76 @@ else:
             max_value=200,
             value=20,
             step=5,
-            key="pos_top_n",
+            key="pos_top_n_language_specific",
         )
 
-    selected_pos_set = set(detailed_pos_options) if selected_detailed_pos == "전체" else {selected_detailed_pos}
-    pos_df = lexical_df[lexical_df["품사"].isin(selected_pos_set)].copy()
+    pos_df = lexical_df[
+        lexical_df["품사 범주"] == selected_pos_group
+    ].copy()
+
+    if selected_detailed_pos != "전체":
+        pos_df = pos_df[pos_df["세부 품사"] == selected_detailed_pos]
+
     pos_word_df = (
-        pos_df.groupby(["기본형", "품사"], as_index=False, dropna=False)["빈도수"]
+        pos_df.groupby(
+            ["기본형", "품사 범주", "세부 품사"],
+            as_index=False,
+            dropna=False,
+        )["빈도수"]
         .sum()
-        .sort_values(["빈도수", "기본형", "품사"], ascending=[False, True, True])
+        .sort_values(
+            ["빈도수", "기본형", "세부 품사"],
+            ascending=[False, True, True],
+        )
         .rename(columns={"기본형": "단어"})
         .reset_index(drop=True)
     )
 
     pos_metric_col1, pos_metric_col2, pos_metric_col3 = st.columns(3)
     with pos_metric_col1:
-        label = selected_pos_group if selected_detailed_pos == "전체" else selected_detailed_pos
-        st.metric("선택한 품사", label)
+        selected_label = (
+            selected_pos_group
+            if selected_detailed_pos == "전체"
+            else selected_detailed_pos
+        )
+        st.metric("선택한 품사", selected_label)
     with pos_metric_col2:
         st.metric("단어 종류 (Type)", f"{len(pos_word_df):,}개")
     with pos_metric_col3:
         st.metric("출현 빈도 합계 (Token)", f"{int(pos_word_df['빈도수'].sum()):,}회")
 
     if pos_word_df.empty:
-        st.info("선택한 품사 범주에 해당하는 단어가 없습니다.")
+        st.info("선택한 품사에 해당하는 단어가 없습니다.")
     else:
         pos_display_df = pos_word_df.head(int(pos_top_n)).copy()
-        pos_counts = pos_display_df.groupby("단어")["품사"].transform("nunique")
+        duplicate_counts = pos_display_df.groupby("단어")["세부 품사"].transform("nunique")
         pos_display_df["표시 단어"] = pos_display_df["단어"]
-        pos_display_df.loc[pos_counts > 1, "표시 단어"] = (
-            pos_display_df.loc[pos_counts > 1, "단어"] + " · " + pos_display_df.loc[pos_counts > 1, "품사"]
+        pos_display_df.loc[duplicate_counts > 1, "표시 단어"] = (
+            pos_display_df.loc[duplicate_counts > 1, "단어"]
+            + " · "
+            + pos_display_df.loc[duplicate_counts > 1, "세부 품사"]
         )
 
-        # 표 높이를 제목행 1개와 실제 데이터 행 수에 맞춰 계산합니다.
-        # 이전처럼 최소 높이를 300px로 고정하면, 상위 10개만 표시할 때
-        # 데이터가 없는 빈 행처럼 보이는 여백이 생길 수 있습니다.
         table_row_height = 35
         table_header_height = 38
-        pos_table_height = (
-            table_header_height
-            + table_row_height * len(pos_display_df)
-            + 3
-        )
+        pos_table_height = table_header_height + table_row_height * len(pos_display_df) + 3
 
-        # 단어 목록 영역을 더 넓히고 그래프 영역은 조금 좁게 배치합니다.
         pos_list_col, pos_chart_col = st.columns([1.2, 1.3])
 
         with pos_list_col:
             st.dataframe(
-                pos_display_df[["단어", "빈도수", "품사"]],
+                pos_display_df[["단어", "빈도수", "세부 품사"]],
                 use_container_width=True,
                 hide_index=True,
                 height=pos_table_height,
                 row_height=table_row_height,
                 column_config={
-                    "단어": st.column_config.TextColumn(
-                        "단어",
-                        width=None,
-                    ),
-                    "빈도수": st.column_config.NumberColumn(
-                        "빈도수",
-                        format="%d",
-                        width="small",
-                    ),
-                    "품사": st.column_config.TextColumn(
-                        "세부 품사",
-                        width="medium",
-                    ),
+                    "단어": st.column_config.TextColumn("단어", width=None),
+                    "빈도수": st.column_config.NumberColumn("빈도수", format="%d", width="small"),
+                    "세부 품사": st.column_config.TextColumn("세부 품사", width="large"),
                 },
             )
+
         with pos_chart_col:
             pos_chart_df = pos_display_df.iloc[::-1].copy()
             pos_figure = px.bar(
@@ -639,9 +738,13 @@ else:
                 y="표시 단어",
                 orientation="h",
                 text="빈도수",
-                hover_data={"품사": True},
+                hover_data={"품사 범주": True, "세부 품사": True},
             )
-            pos_figure.update_traces(marker_color="#7d8d4d", textposition="outside", cliponaxis=False)
+            pos_figure.update_traces(
+                marker_color="#7d8d4d",
+                textposition="outside",
+                cliponaxis=False,
+            )
             pos_figure.update_layout(
                 height=max(430, 31 * len(pos_chart_df)),
                 margin=dict(l=10, r=45, t=20, b=20),
@@ -653,8 +756,15 @@ else:
                 yaxis_categoryarray=pos_chart_df["표시 단어"].tolist(),
                 font=dict(color="#24331f"),
             )
-            pos_figure.update_xaxes(showgrid=True, gridcolor="rgba(125,141,77,0.16)")
-            st.plotly_chart(pos_figure, use_container_width=True, config={"displayModeBar": False})
+            pos_figure.update_xaxes(
+                showgrid=True,
+                gridcolor="rgba(125,141,77,0.16)",
+            )
+            st.plotly_chart(
+                pos_figure,
+                use_container_width=True,
+                config={"displayModeBar": False},
+            )
 
 
 # ------------------------------------------------------------
@@ -678,53 +788,83 @@ with frequency_col1:
         max_value=min(200, max(5, len(lexical_df))),
         value=min(20, max(5, len(lexical_df))),
         step=5,
-        key="frequency_top_n",
+        key="frequency_top_n_language_specific",
     )
-    remove_symbols = st.checkbox("문장부호와 기타 기호 제외", value=True)
+    remove_symbols = st.checkbox(
+        "문장부호와 기호 제외",
+        value=True,
+        key="remove_symbols_language_specific",
+    )
 with frequency_col2:
     st.caption(
-        "전체 품사를 대상으로 기본형 기준 단어 빈도를 표시합니다. "
+        "선택한 언어의 전체 품사를 대상으로 기본형 기준 단어 빈도를 표시합니다. "
         "영문 알파벳 한 글자 단어는 자동으로 제외합니다."
     )
 
 frequency_df = lexical_df.copy()
-one_letter_english = frequency_df["단어"].str.fullmatch(r"[A-Za-z]", na=False)
+one_letter_english = frequency_df["형태소"].str.fullmatch(r"[A-Za-z]", na=False)
 frequency_df = frequency_df[~one_letter_english]
 
 if remove_symbols:
-    excluded_pos = {
-        "마침표·물음표·느낌표", "쉼표·가운뎃점·콜론", "괄호·따옴표",
-        "여는 괄호·따옴표", "닫는 괄호·따옴표", "줄임표", "붙임표", "기타 기호",
-    }
-    frequency_df = frequency_df[~frequency_df["품사"].isin(excluded_pos)]
+    if analysis_language == "한국어":
+        excluded_categories = {"문장부호", "기타 기호"}
+    elif analysis_language == "일본어":
+        excluded_categories = {"補助記号", "記号", "空白"}
+    else:
+        excluded_categories = {"기호"}
+
+    frequency_df = frequency_df[
+        ~frequency_df["품사 범주"].isin(excluded_categories)
+    ]
 
 frequency_df = (
-    frequency_df.groupby(["단어", "품사", "기본형"], as_index=False, dropna=False)["빈도수"]
+    frequency_df.groupby(
+        ["기본형", "품사 범주", "세부 품사"],
+        as_index=False,
+        dropna=False,
+    )["빈도수"]
     .sum()
-    .sort_values(["빈도수", "단어", "품사"], ascending=[False, True, True])
+    .sort_values(
+        ["빈도수", "기본형", "세부 품사"],
+        ascending=[False, True, True],
+    )
     .head(int(top_n))
+    .rename(columns={"기본형": "단어"})
 )
 
-word_pos_counts = frequency_df.groupby("기본형")["품사"].transform("nunique")
-frequency_df["표시 단어"] = frequency_df["기본형"]
-frequency_df.loc[word_pos_counts > 1, "표시 단어"] = (
-    frequency_df.loc[word_pos_counts > 1, "기본형"] + " · " + frequency_df.loc[word_pos_counts > 1, "품사"]
+duplicate_counts = frequency_df.groupby("단어")["세부 품사"].transform("nunique")
+frequency_df["표시 단어"] = frequency_df["단어"]
+frequency_df.loc[duplicate_counts > 1, "표시 단어"] = (
+    frequency_df.loc[duplicate_counts > 1, "단어"]
+    + " · "
+    + frequency_df.loc[duplicate_counts > 1, "세부 품사"]
 )
 
 if frequency_df.empty:
     st.warning("현재 조건에 표시할 단어가 없습니다.")
 else:
-    list_col, chart_col = st.columns([0.8, 1.7])
+    list_col, chart_col = st.columns([1.05, 1.45])
+
     with list_col:
-        frequency_table_df = frequency_df[["기본형", "빈도수", "품사", "단어"]].rename(
-            columns={"기본형": "단어", "단어": "분석된 형태소"}
-        )
+        frequency_table_df = frequency_df[
+            ["단어", "빈도수", "품사 범주", "세부 품사"]
+        ]
+        frequency_row_height = 35
+        frequency_table_height = 38 + frequency_row_height * len(frequency_table_df) + 3
         st.dataframe(
             frequency_table_df,
             use_container_width=True,
             hide_index=True,
-            height=max(300, min(680, 42 * len(frequency_df) + 38)),
+            height=frequency_table_height,
+            row_height=frequency_row_height,
+            column_config={
+                "단어": st.column_config.TextColumn("단어", width=None),
+                "빈도수": st.column_config.NumberColumn("빈도수", format="%d", width="small"),
+                "품사 범주": st.column_config.TextColumn("품사 범주", width="medium"),
+                "세부 품사": st.column_config.TextColumn("세부 품사", width="large"),
+            },
         )
+
     with chart_col:
         chart_df = frequency_df.iloc[::-1].copy()
         figure = px.bar(
@@ -733,9 +873,13 @@ else:
             y="표시 단어",
             orientation="h",
             text="빈도수",
-            hover_data={"품사": True},
+            hover_data={"품사 범주": True, "세부 품사": True},
         )
-        figure.update_traces(marker_color="#7d8d4d", textposition="outside", cliponaxis=False)
+        figure.update_traces(
+            marker_color="#7d8d4d",
+            textposition="outside",
+            cliponaxis=False,
+        )
         figure.update_layout(
             height=max(430, 31 * len(chart_df)),
             margin=dict(l=10, r=45, t=20, b=20),
@@ -747,5 +891,12 @@ else:
             yaxis_categoryarray=chart_df["표시 단어"].tolist(),
             font=dict(color="#24331f"),
         )
-        figure.update_xaxes(showgrid=True, gridcolor="rgba(125,141,77,0.16)")
-        st.plotly_chart(figure, use_container_width=True, config={"displayModeBar": False})
+        figure.update_xaxes(
+            showgrid=True,
+            gridcolor="rgba(125,141,77,0.16)",
+        )
+        st.plotly_chart(
+            figure,
+            use_container_width=True,
+            config={"displayModeBar": False},
+        )
