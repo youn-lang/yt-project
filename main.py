@@ -831,7 +831,6 @@ if load_button:
             st.session_state["comments_df"] = comments_df
             st.session_state["video_id"] = video_id
             st.session_state["video_url"] = youtube_url
-            st.session_state["analysis_language"] = analysis_language
 
             metric_col1, metric_col2 = st.columns(2)
 
