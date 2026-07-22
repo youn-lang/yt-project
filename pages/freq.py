@@ -239,7 +239,9 @@ comments_df["댓글"] = comments_df["댓글"].fillna("").astype(str)
 # ------------------------------------------------------------
 # 3. 분석 언어와 형태소 분석기 준비
 # ------------------------------------------------------------
-analysis_language = st.session_state.get("analysis_language")
+analysis_language = st.session_state.get(
+    "selected_analysis_language"
+)
 
 if analysis_language not in {"한국어", "일본어", "영어"}:
     st.warning(
