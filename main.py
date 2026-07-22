@@ -61,18 +61,13 @@ st.markdown(
 
     .hero {
         position: relative;
-        box-sizing: border-box;
-        width: 100%;
-        height: 220px;
-        min-height: 220px;
-        max-height: 220px;
         overflow: hidden;
         background:
             linear-gradient(135deg, rgba(255,255,255,0.98), rgba(239,242,228,0.96));
         border: 1px solid var(--line);
         border-radius: 26px;
-        padding: 1.25rem 1.65rem;
-        margin-bottom: 0.75rem;
+        padding: 1.45rem 1.8rem;
+        margin-bottom: 0.85rem;
         box-shadow: 0 16px 40px rgba(36, 51, 31, 0.10);
     }
 
@@ -105,11 +100,9 @@ st.markdown(
         position: relative;
         z-index: 2;
         display: grid;
-        grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
-        gap: 1rem;
+        grid-template-columns: 1.15fr 0.85fr;
+        gap: 1.2rem;
         align-items: center;
-        height: 100%;
-        min-height: 0;
     }
 
     .hero-kicker {
@@ -135,21 +128,16 @@ st.markdown(
     }
 
     .hero-copy {
-        margin-top: 0.55rem;
-        margin-bottom: 0;
+        margin-top: 0.65rem;
         color: var(--gray);
-        font-size: 0.92rem;
-        line-height: 1.45;
-        max-width: 620px;
+        font-size: 0.96rem;
+        line-height: 1.55;
+        max-width: 650px;
     }
 
     .visual-panel {
         position: relative;
-        width: 100%;
-        height: 165px;
-        min-height: 165px;
-        max-height: 165px;
-        overflow: hidden;
+        min-height: 175px;
     }
 
     .screen {
@@ -399,63 +387,39 @@ st.markdown(
 
     @media (max-width: 820px) {
         .hero {
-            height: 195px;
-            min-height: 195px;
-            max-height: 195px;
-            padding: 1rem 1.1rem;
+            padding: 1.1rem;
         }
 
         .hero-grid {
-            grid-template-columns: minmax(0, 1.2fr) minmax(220px, 0.8fr);
-            gap: 0.65rem;
+            grid-template-columns: 1.15fr 0.85fr;
+            gap: 0.7rem;
         }
 
         .visual-panel {
-            height: 145px;
             min-height: 145px;
-            max-height: 145px;
         }
 
         .hero-title {
-            font-size: 1.7rem;
-        }
-
-        .hero-kicker {
-            font-size: 0.76rem;
-            margin-bottom: 0.4rem;
+            font-size: 1.8rem;
         }
 
         .hero-copy {
-            font-size: 0.82rem;
-            line-height: 1.35;
+            font-size: 0.88rem;
+            line-height: 1.45;
         }
     }
 
-    @media (max-width: 600px) {
-        .hero {
-            height: 170px;
-            min-height: 170px;
-            max-height: 170px;
-            padding: 1rem;
-        }
-
+    @media (max-width: 520px) {
         .hero-grid {
-            display: block;
-            height: 100%;
+            grid-template-columns: 1fr;
         }
 
         .visual-panel {
             display: none;
         }
 
-        .hero-title {
-            font-size: 1.65rem;
-        }
-
         .hero-copy {
-            max-width: none;
-            font-size: 0.82rem;
-            line-height: 1.35;
+            margin-bottom: 0;
         }
     }
     </style>
