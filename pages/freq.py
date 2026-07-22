@@ -768,17 +768,38 @@ available_pos_groups = [
 if not available_pos_groups:
     st.info("현재 분석 결과에서 선택할 수 있는 품사를 찾지 못했습니다.")
 else:
-    selected_pos_group = st.selectbox(
-        "분석할 품사 범주",
-        options=available_pos_groups,
-        index=0,
-        help="큰 품사 범주를 고르면 그 안에 포함된 세부 품사를 함께 분석합니다.",
+    selection_col1, selection_col2 = st.columns(2)
+
+    with selection_col1:
+        selected_pos_group = st.selectbox(
+            "품사 범주",
+            options=available_pos_groups,
+            index=0,
+            help="명사·동사·조사처럼 큰 품사 범주를 먼저 선택합니다.",
+        )
+
+    # 선택한 큰 범주 안에서 실제 데이터에 존재하는 세부 품사만 추립니다.
+    detailed_pos_options = sorted(
+        existing_pos.intersection(POS_GROUPS[selected_pos_group])
     )
 
-    selected_detailed_pos = POS_GROUPS[selected_pos_group]
+    with selection_col2:
+        selected_detailed_pos = st.selectbox(
+            "세부 품사",
+            options=["전체"] + detailed_pos_options,
+            index=0,
+            help="전체를 선택하면 해당 범주의 모든 세부 품사를 함께 분석합니다.",
+        )
+
+    # '전체'를 선택하면 큰 범주 안의 모든 세부 품사를 사용합니다.
+    # 개별 세부 품사를 선택하면 해당 품사만 남깁니다.
+    if selected_detailed_pos == "전체":
+        selected_pos_set = set(detailed_pos_options)
+    else:
+        selected_pos_set = {selected_detailed_pos}
 
     pos_df = lexical_df[
-        lexical_df["품사"].isin(selected_detailed_pos)
+        lexical_df["품사"].isin(selected_pos_set)
     ].copy()
 
     # 품사 분석 화면에서는 기본형을 단어로 표시합니다.
@@ -801,9 +822,15 @@ else:
     pos_metric_col1, pos_metric_col2, pos_metric_col3 = st.columns(3)
 
     with pos_metric_col1:
+        selected_pos_label = (
+            selected_pos_group
+            if selected_detailed_pos == "전체"
+            else selected_detailed_pos
+        )
+
         st.metric(
             "선택한 품사",
-            selected_pos_group,
+            selected_pos_label,
         )
 
     with pos_metric_col2:
@@ -820,10 +847,11 @@ else:
 
     detailed_pos_found = sorted(pos_word_df["품사"].unique().tolist())
 
-    st.caption(
-        "포함된 세부 품사: "
-        + ", ".join(detailed_pos_found)
-    )
+    if detailed_pos_found:
+        st.caption(
+            "분석에 포함된 세부 품사: "
+            + ", ".join(detailed_pos_found)
+        )
 
     if pos_word_df.empty:
         st.info("선택한 품사 범주에 해당하는 단어가 없습니다.")
