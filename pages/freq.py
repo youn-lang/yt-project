@@ -450,10 +450,15 @@ if lexical_df.empty:
 result_col1, result_col2 = st.columns([1, 1])
 
 with result_col1:
-    st.metric("서로 다른 분석 항목", f"{len(lexical_df):,}개")
+    st.metric("형태소 종류 (Type)", f"{len(lexical_df):,}개")
 
 with result_col2:
-    st.metric("전체 형태소 수", f"{lexical_df['빈도수'].sum():,}개")
+    st.metric("전체 출현 형태소 (Token)", f"{lexical_df['빈도수'].sum():,}개")
+
+st.caption(
+    "형태소는 형태소 분석기가 나눈 최소 분석 단위입니다. "
+    "Type은 서로 다른 형태소 항목의 수이고, Token은 중복을 포함한 전체 출현 횟수입니다."
+)
 
 csv_data = lexical_df.to_csv(
     index=False,
@@ -475,7 +480,7 @@ with st.expander("형태소 분석 표 보기", expanded=False):
         hide_index=True,
         height=500,
         column_config={
-            "단어": st.column_config.TextColumn("단어", width="medium"),
+            "단어": st.column_config.TextColumn("형태소", width="medium"),
             "빈도수": st.column_config.NumberColumn(
                 "빈도수",
                 format="%d",
@@ -518,7 +523,8 @@ with frequency_col1:
 
 with frequency_col2:
     st.caption(
-        "영문으로 분석된 알파벳 한 글자 단어는 자동으로 제외합니다."
+        "이 영역에서는 형태소 분석 결과를 사용하되, 화면에는 기본형을 기준으로 한 "
+        "단어 목록으로 표시합니다. 영문 알파벳 한 글자 단어는 자동으로 제외합니다."
     )
 
 
@@ -561,12 +567,12 @@ frequency_df = (
     .head(int(top_n))
 )
 
-# 표면형이 같고 품사만 다른 항목이 그래프에서 같은 라벨로 겹치지 않도록
-# "단어 · 품사" 형식의 표시용 라벨을 만듭니다.
-word_pos_counts = frequency_df.groupby("단어")["품사"].transform("nunique")
-frequency_df["표시 단어"] = frequency_df["단어"]
+# 출현 빈도 분석에서는 기본형을 '단어'로 표시합니다.
+# 같은 기본형이 여러 품사로 나타나면 그래프에서 구분할 수 있도록 품사를 덧붙입니다.
+word_pos_counts = frequency_df.groupby("기본형")["품사"].transform("nunique")
+frequency_df["표시 단어"] = frequency_df["기본형"]
 frequency_df.loc[word_pos_counts > 1, "표시 단어"] = (
-    frequency_df.loc[word_pos_counts > 1, "단어"]
+    frequency_df.loc[word_pos_counts > 1, "기본형"]
     + " · "
     + frequency_df.loc[word_pos_counts > 1, "품사"]
 )
@@ -577,11 +583,33 @@ else:
     list_col, chart_col = st.columns([0.8, 1.7])
 
     with list_col:
+        frequency_table_df = frequency_df[
+            ["기본형", "빈도수", "품사", "단어"]
+        ].rename(
+            columns={
+                "기본형": "단어",
+                "단어": "분석된 형태소",
+            }
+        )
+
         st.dataframe(
-            frequency_df[["단어", "빈도수", "품사", "기본형"]],
+            frequency_table_df,
             use_container_width=True,
             hide_index=True,
             height=max(300, min(680, 42 * len(frequency_df) + 38)),
+            column_config={
+                "단어": st.column_config.TextColumn("단어", width="medium"),
+                "빈도수": st.column_config.NumberColumn(
+                    "빈도수",
+                    format="%d",
+                    width="small",
+                ),
+                "품사": st.column_config.TextColumn("품사", width="medium"),
+                "분석된 형태소": st.column_config.TextColumn(
+                    "분석된 형태소",
+                    width="medium",
+                ),
+            },
         )
 
     with chart_col:
@@ -608,8 +636,8 @@ else:
             margin=dict(l=10, r=45, t=20, b=20),
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
-            xaxis_title="출현 빈도수",
-            yaxis_title="",
+            xaxis_title="단어 출현 빈도수",
+            yaxis_title="단어",
             yaxis_categoryorder="array",
             yaxis_categoryarray=chart_df["표시 단어"].tolist(),
             font=dict(color="#24331f"),
