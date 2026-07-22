@@ -61,13 +61,18 @@ st.markdown(
 
     .hero {
         position: relative;
+        box-sizing: border-box;
+        width: 100%;
+        height: 220px;
+        min-height: 220px;
+        max-height: 220px;
         overflow: hidden;
         background:
             linear-gradient(135deg, rgba(255,255,255,0.98), rgba(239,242,228,0.96));
         border: 1px solid var(--line);
         border-radius: 26px;
-        padding: 1.45rem 1.8rem;
-        margin-bottom: 0.85rem;
+        padding: 1.25rem 1.65rem;
+        margin-bottom: 0.75rem;
         box-shadow: 0 16px 40px rgba(36, 51, 31, 0.10);
     }
 
@@ -100,9 +105,11 @@ st.markdown(
         position: relative;
         z-index: 2;
         display: grid;
-        grid-template-columns: 1.15fr 0.85fr;
-        gap: 1.2rem;
+        grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+        gap: 1rem;
         align-items: center;
+        height: 100%;
+        min-height: 0;
     }
 
     .hero-kicker {
@@ -128,16 +135,21 @@ st.markdown(
     }
 
     .hero-copy {
-        margin-top: 0.65rem;
+        margin-top: 0.55rem;
+        margin-bottom: 0;
         color: var(--gray);
-        font-size: 0.96rem;
-        line-height: 1.55;
-        max-width: 650px;
+        font-size: 0.92rem;
+        line-height: 1.45;
+        max-width: 620px;
     }
 
     .visual-panel {
         position: relative;
-        min-height: 175px;
+        width: 100%;
+        height: 165px;
+        min-height: 165px;
+        max-height: 165px;
+        overflow: hidden;
     }
 
     .screen {
@@ -387,39 +399,63 @@ st.markdown(
 
     @media (max-width: 820px) {
         .hero {
-            padding: 1.1rem;
+            height: 195px;
+            min-height: 195px;
+            max-height: 195px;
+            padding: 1rem 1.1rem;
         }
 
         .hero-grid {
-            grid-template-columns: 1.15fr 0.85fr;
-            gap: 0.7rem;
+            grid-template-columns: minmax(0, 1.2fr) minmax(220px, 0.8fr);
+            gap: 0.65rem;
         }
 
         .visual-panel {
+            height: 145px;
             min-height: 145px;
+            max-height: 145px;
         }
 
         .hero-title {
-            font-size: 1.8rem;
+            font-size: 1.7rem;
+        }
+
+        .hero-kicker {
+            font-size: 0.76rem;
+            margin-bottom: 0.4rem;
         }
 
         .hero-copy {
-            font-size: 0.88rem;
-            line-height: 1.45;
+            font-size: 0.82rem;
+            line-height: 1.35;
         }
     }
 
-    @media (max-width: 520px) {
+    @media (max-width: 600px) {
+        .hero {
+            height: 170px;
+            min-height: 170px;
+            max-height: 170px;
+            padding: 1rem;
+        }
+
         .hero-grid {
-            grid-template-columns: 1fr;
+            display: block;
+            height: 100%;
         }
 
         .visual-panel {
             display: none;
         }
 
+        .hero-title {
+            font-size: 1.65rem;
+        }
+
         .hero-copy {
-            margin-bottom: 0;
+            max-width: none;
+            font-size: 0.82rem;
+            line-height: 1.35;
         }
     }
     </style>
@@ -494,6 +530,7 @@ st.markdown(
 # ------------------------------------------------------------
 EXAMPLE_1_URL = "https://youtu.be/d95J8yzvjbQ?si=LfL5DLwCL8Pk077r"
 EXAMPLE_2_URL = "https://youtu.be/I9vK5EVTt0U?si=NEZ8L7MRuNvrzINa"
+EXAMPLE_3_URL = "https://www.youtube.com/watch?v=7lXj30zLaXI"
 
 if "youtube_url" not in st.session_state:
     st.session_state.youtube_url = EXAMPLE_1_URL
@@ -509,7 +546,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-example_col1, example_col2 = st.columns(2)
+example_col1, example_col2, example_col3 = st.columns(3)
 
 with example_col1:
     if st.button(
@@ -524,6 +561,13 @@ with example_col2:
         use_container_width=True,
     ):
         st.session_state.youtube_url = EXAMPLE_2_URL
+
+with example_col3:
+    if st.button(
+        "예시 3 · 'Avengers: Endgame' 명장면 (일본어 댓글)",
+        use_container_width=True,
+    ):
+        st.session_state.youtube_url = EXAMPLE_3_URL
 
 youtube_url = st.text_input(
     "유튜브 영상 링크",
@@ -831,8 +875,6 @@ if load_button:
                 comments,
                 columns=["작성자 ID", "작성 일시", "댓글", "좋아요"],
             )
-            # 서브 페이지에서 사용할 수 있도록 댓글 데이터를 저장합니다.
-            st.session_state["comments_df"] = comments_df
 
             metric_col1, metric_col2 = st.columns(2)
 
