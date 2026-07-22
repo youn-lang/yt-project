@@ -1,3 +1,5 @@
 requests
 plotly
 kiwipiepy
+fugashi
+unidic-lite
