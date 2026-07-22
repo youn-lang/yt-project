@@ -655,13 +655,208 @@ else:
         )
 
 
+
+
 # ------------------------------------------------------------
-# 6. 문자열 검색
+# 6. 품사 분석
 # ------------------------------------------------------------
 st.markdown(
     """
     <div class="section-label">
         <span class="section-number">3</span>
+        품사 분석
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.caption(
+    "세부 품사명을 한꺼번에 나열하지 않고, 명사·동사·조사처럼 "
+    "큰 범주로 묶어 선택할 수 있습니다. 표에서는 실제 세부 품사도 함께 표시합니다."
+)
+
+# 형태소 분석기에 사용된 세부 품사를 비전공자가 고르기 쉬운 큰 범주로 묶습니다.
+POS_GROUPS = {
+    "명사": {
+        "일반 명사",
+        "고유 명사",
+        "의존 명사",
+        "대명사",
+        "수사",
+    },
+    "동사": {
+        "동사",
+        "보조 용언",
+        "긍정 지정사",
+        "부정 지정사",
+    },
+    "형용사": {
+        "형용사",
+    },
+    "관형사·부사": {
+        "관형사",
+        "일반 부사",
+        "접속 부사",
+    },
+    "감탄사": {
+        "감탄사",
+    },
+    "조사": {
+        "주격 조사",
+        "보격 조사",
+        "관형격 조사",
+        "목적격 조사",
+        "부사격 조사",
+        "호격 조사",
+        "인용격 조사",
+        "보조사",
+        "접속 조사",
+    },
+    "어미": {
+        "선어말 어미",
+        "종결 어미",
+        "연결 어미",
+        "명사형 전성 어미",
+        "관형형 전성 어미",
+    },
+    "접사·어근": {
+        "접두사",
+        "명사 파생 접미사",
+        "동사 파생 접미사",
+        "형용사 파생 접미사",
+        "어근",
+        "덧붙은 받침",
+    },
+    "영문·한자·숫자": {
+        "영문",
+        "한자",
+        "숫자",
+    },
+    "웹 표현": {
+        "URL",
+        "이메일",
+        "해시태그",
+        "멘션",
+        "일련번호",
+    },
+    "이모지": {
+        "이모지",
+    },
+    "문장부호·기호": {
+        "마침표·물음표·느낌표",
+        "쉼표·가운뎃점·콜론",
+        "괄호·따옴표",
+        "여는 괄호·따옴표",
+        "닫는 괄호·따옴표",
+        "줄임표",
+        "붙임표",
+        "기타 기호",
+    },
+    "기타": {
+        "사용자 정의어",
+    },
+}
+
+# 실제 분석 결과에 존재하는 품사만 포함된 그룹을 선택지로 제공합니다.
+existing_pos = set(lexical_df["품사"].dropna().astype(str))
+available_pos_groups = [
+    group_name
+    for group_name, detailed_pos in POS_GROUPS.items()
+    if existing_pos.intersection(detailed_pos)
+]
+
+if not available_pos_groups:
+    st.info("현재 분석 결과에서 선택할 수 있는 품사를 찾지 못했습니다.")
+else:
+    selected_pos_group = st.selectbox(
+        "분석할 품사 범주",
+        options=available_pos_groups,
+        index=0,
+        help="큰 품사 범주를 고르면 그 안에 포함된 세부 품사를 함께 분석합니다.",
+    )
+
+    selected_detailed_pos = POS_GROUPS[selected_pos_group]
+
+    pos_df = lexical_df[
+        lexical_df["품사"].isin(selected_detailed_pos)
+    ].copy()
+
+    # 품사 분석 화면에서는 기본형을 단어로 표시합니다.
+    # 같은 기본형이라도 세부 품사가 다르면 별도의 단어 항목으로 유지합니다.
+    pos_word_df = (
+        pos_df.groupby(
+            ["기본형", "품사"],
+            as_index=False,
+            dropna=False,
+        )["빈도수"]
+        .sum()
+        .sort_values(
+            ["빈도수", "기본형", "품사"],
+            ascending=[False, True, True],
+        )
+        .rename(columns={"기본형": "단어"})
+        .reset_index(drop=True)
+    )
+
+    pos_metric_col1, pos_metric_col2, pos_metric_col3 = st.columns(3)
+
+    with pos_metric_col1:
+        st.metric(
+            "선택한 품사",
+            selected_pos_group,
+        )
+
+    with pos_metric_col2:
+        st.metric(
+            "단어 종류 (Type)",
+            f"{len(pos_word_df):,}개",
+        )
+
+    with pos_metric_col3:
+        st.metric(
+            "출현 빈도 합계 (Token)",
+            f"{int(pos_word_df['빈도수'].sum()):,}회",
+        )
+
+    detailed_pos_found = sorted(pos_word_df["품사"].unique().tolist())
+
+    st.caption(
+        "포함된 세부 품사: "
+        + ", ".join(detailed_pos_found)
+    )
+
+    if pos_word_df.empty:
+        st.info("선택한 품사 범주에 해당하는 단어가 없습니다.")
+    else:
+        st.dataframe(
+            pos_word_df[["단어", "빈도수", "품사"]],
+            use_container_width=True,
+            hide_index=True,
+            height=min(620, max(260, 42 * len(pos_word_df) + 38)),
+            column_config={
+                "단어": st.column_config.TextColumn(
+                    "단어",
+                    width="large",
+                ),
+                "빈도수": st.column_config.NumberColumn(
+                    "빈도수",
+                    format="%d",
+                    width="small",
+                ),
+                "품사": st.column_config.TextColumn(
+                    "세부 품사",
+                    width="medium",
+                ),
+            },
+        )
+
+# ------------------------------------------------------------
+# 7. 문자열 검색
+# ------------------------------------------------------------
+st.markdown(
+    """
+    <div class="section-label">
+        <span class="section-number">4</span>
         문자열 검색
     </div>
     """,
