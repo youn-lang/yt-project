@@ -361,6 +361,68 @@ def japanese_detailed_pos(pos_tuple: tuple[str, ...]) -> str:
     return "-".join(meaningful) if meaningful else "未分類"
 
 
+def katakana_to_hiragana(text: str) -> str:
+    """가타카나 읽기를 히라가나로 통일합니다."""
+    converted = []
+
+    for character in text:
+        code_point = ord(character)
+
+        if 0x30A1 <= code_point <= 0x30F6:
+            converted.append(chr(code_point - 0x60))
+        else:
+            converted.append(character)
+
+    return "".join(converted)
+
+
+# Sudachi 사전에서 별도 기본형으로 처리될 수 있는 구어형·표기 변이를
+# 연구 목적에 맞는 대표 기본형으로 통합합니다.
+# 필요하면 이 사전에 항목을 계속 추가할 수 있습니다.
+JAPANESE_LEMMA_ALIASES = {
+    "みる": "見る",
+    "見れる": "見る",
+    "みれる": "見る",
+}
+
+JAPANESE_READING_ALIASES = {
+    "みれる": "みる",
+}
+
+
+def normalize_japanese_lemma(
+    dictionary_form: str,
+    normalized_form: str,
+    major_pos: str,
+) -> str:
+    """
+    일본어 기본형을 집계용 대표형으로 정규화합니다.
+
+    1. Sudachi의 normalized_form을 우선 사용합니다.
+    2. 동사·형용사류는 별도 대응표를 적용합니다.
+    3. 대응표에 없는 항목은 Sudachi의 정규화형을 유지합니다.
+    """
+    candidate = normalized_form
+
+    if not candidate or candidate == "*":
+        candidate = dictionary_form
+
+    if not candidate or candidate == "*":
+        candidate = ""
+
+    predicate_categories = {
+        "動詞",
+        "形容詞",
+        "形状詞",
+        "助動詞",
+    }
+
+    if major_pos in predicate_categories:
+        return JAPANESE_LEMMA_ALIASES.get(candidate, candidate)
+
+    return candidate
+
+
 def append_emoji_rows(rows: list[dict], form: str, language: str) -> str:
     """토큰 안의 이모지를 독립 항목으로 기록하고 남은 문자열을 반환합니다."""
     for emoji_text in EMOJI_SEQUENCE_PATTERN.findall(form):
@@ -369,6 +431,9 @@ def append_emoji_rows(rows: list[dict], form: str, language: str) -> str:
                 "언어": language,
                 "형태소": emoji_text,
                 "기본형": emoji_text,
+                "정규화형": emoji_text,
+                "읽기": "",
+                "표기 변이": emoji_text,
                 "품사 범주": "이모지" if language != "일본어" else "絵文字",
                 "세부 품사": "이모지" if language != "일본어" else "絵文字",
                 "원래 품사": "EMOJI",
@@ -395,6 +460,9 @@ def analyze_korean_text(text: str, rows: list[dict]) -> None:
                 "언어": "한국어",
                 "형태소": display_form,
                 "기본형": make_korean_base_form(form, tag),
+                "정규화형": make_korean_base_form(form, tag),
+                "읽기": "",
+                "표기 변이": display_form,
                 "품사 범주": korean_major_pos(tag),
                 "세부 품사": KOREAN_POS_NAMES.get(tag, tag),
                 "원래 품사": tag,
@@ -404,12 +472,18 @@ def analyze_korean_text(text: str, rows: list[dict]) -> None:
 
 def analyze_japanese_text(text: str, rows: list[dict]) -> None:
     sudachi = load_sudachi()
-    for morpheme in sudachi.tokenize(text, tokenizer.Tokenizer.SplitMode.B):
+
+    for morpheme in sudachi.tokenize(
+        text,
+        tokenizer.Tokenizer.SplitMode.B,
+    ):
         form = morpheme.surface().strip()
+
         if not form:
             continue
 
         remaining = append_emoji_rows(rows, form, "일본어")
+
         if not remaining:
             continue
 
@@ -422,15 +496,44 @@ def analyze_japanese_text(text: str, rows: list[dict]) -> None:
         if major_pos == "空白":
             continue
 
-        base_form = morpheme.dictionary_form()
-        if not base_form or base_form == "*":
-            base_form = form
+        dictionary_form = morpheme.dictionary_form()
+
+        if not dictionary_form or dictionary_form == "*":
+            dictionary_form = form
+
+        normalized_form = morpheme.normalized_form()
+
+        if not normalized_form or normalized_form == "*":
+            normalized_form = dictionary_form
+
+        reading = morpheme.reading_form()
+
+        if not reading or reading == "*":
+            reading = form
+
+        reading_hiragana = katakana_to_hiragana(reading)
+        reading_hiragana = JAPANESE_READING_ALIASES.get(
+            reading_hiragana,
+            reading_hiragana,
+        )
+
+        canonical_lemma = normalize_japanese_lemma(
+            dictionary_form=dictionary_form,
+            normalized_form=normalized_form,
+            major_pos=major_pos,
+        )
+
+        if not canonical_lemma:
+            canonical_lemma = dictionary_form
 
         rows.append(
             {
                 "언어": "일본어",
                 "형태소": form,
-                "기본형": base_form,
+                "기본형": canonical_lemma,
+                "정규화형": normalized_form,
+                "읽기": reading_hiragana,
+                "표기 변이": form,
                 "품사 범주": major_pos,
                 "세부 품사": detailed_pos,
                 "원래 품사": original_pos,
@@ -467,6 +570,9 @@ def analyze_english_text(text: str, rows: list[dict]) -> None:
                 "언어": "영어",
                 "형태소": token_text.lower() if category == "영문 단어" else token_text,
                 "기본형": base_form,
+                "정규화형": base_form,
+                "읽기": "",
+                "표기 변이": token_text,
                 "품사 범주": category,
                 "세부 품사": detail,
                 "원래 품사": "SIMPLE_TOKENIZER",
@@ -488,23 +594,113 @@ def analyze_comments(comment_series: pd.Series, language: str) -> pd.DataFrame:
             analyze_english_text(text, rows)
 
     columns = [
-        "언어", "형태소", "빈도수", "품사 범주",
-        "세부 품사", "기본형", "원래 품사",
+        "언어",
+        "형태소",
+        "빈도수",
+        "품사 범주",
+        "세부 품사",
+        "기본형",
+        "정규화형",
+        "읽기",
+        "표기 변이",
+        "원래 품사",
     ]
 
     if not rows:
         return pd.DataFrame(columns=columns)
 
     token_df = pd.DataFrame(rows)
-    result_df = (
-        token_df.groupby(
-            ["언어", "형태소", "품사 범주", "세부 품사", "기본형", "원래 품사"],
-            as_index=False,
+
+    if language == "일본어":
+        # 일본어는 정규화된 기본형과 품사를 기준으로 하나의 항목으로 집계합니다.
+        # 실제 댓글에 나온 한자·히라가나·활용형은 '표기 변이' 열에 보존합니다.
+        group_columns = [
+            "언어",
+            "기본형",
+            "품사 범주",
+            "세부 품사",
+            "원래 품사",
+        ]
+
+        grouped_rows = []
+
+        for group_values, group_df in token_df.groupby(
+            group_columns,
             dropna=False,
+            sort=False,
+        ):
+            (
+                group_language,
+                base_form,
+                major_pos,
+                detailed_pos,
+                original_pos,
+            ) = group_values
+
+            variants = sorted(
+                {
+                    str(value)
+                    for value in group_df["표기 변이"]
+                    if str(value).strip()
+                }
+            )
+
+            normalized_variants = sorted(
+                {
+                    str(value)
+                    for value in group_df["정규화형"]
+                    if str(value).strip()
+                }
+            )
+
+            readings = sorted(
+                {
+                    str(value)
+                    for value in group_df["읽기"]
+                    if str(value).strip()
+                }
+            )
+
+            grouped_rows.append(
+                {
+                    "언어": group_language,
+                    "형태소": base_form,
+                    "빈도수": len(group_df),
+                    "품사 범주": major_pos,
+                    "세부 품사": detailed_pos,
+                    "기본형": base_form,
+                    "정규화형": " / ".join(normalized_variants),
+                    "읽기": " / ".join(readings),
+                    "표기 변이": " / ".join(variants),
+                    "원래 품사": original_pos,
+                }
+            )
+
+        result_df = pd.DataFrame(grouped_rows)
+
+    else:
+        result_df = (
+            token_df.groupby(
+                [
+                    "언어",
+                    "형태소",
+                    "품사 범주",
+                    "세부 품사",
+                    "기본형",
+                    "정규화형",
+                    "읽기",
+                    "표기 변이",
+                    "원래 품사",
+                ],
+                as_index=False,
+                dropna=False,
+            )
+            .size()
+            .rename(columns={"size": "빈도수"})
         )
-        .size()
-        .rename(columns={"size": "빈도수"})
-        .sort_values(
+
+    result_df = (
+        result_df.sort_values(
             ["빈도수", "형태소", "품사 범주", "세부 품사"],
             ascending=[False, True, True, True],
         )
@@ -562,8 +758,10 @@ with result_col3:
 
 if analysis_language == "일본어":
     st.caption(
-        "일본어 품사명은 SudachiPy가 반환한 일본어 분류 체계를 그대로 사용합니다. "
-        "'원래 품사' 열에는 Sudachi의 전체 품사 배열을 보존합니다."
+        "일본어는 SudachiPy의 사전형과 정규화형을 사용해 활용형과 표기 변이를 통합합니다. "
+        "예를 들어 見る·みる·見れる는 대표 기본형 見る로 집계하며, "
+        "실제 댓글에 나온 형태는 '표기 변이' 열에 보존합니다. "
+        "품사명과 원래 품사 배열은 Sudachi 체계를 그대로 유지합니다."
     )
 elif analysis_language == "한국어":
     st.caption(
@@ -596,7 +794,10 @@ with st.expander("형태소 분석 표 보기", expanded=False):
             "빈도수": st.column_config.NumberColumn("빈도수", format="%d", width="small"),
             "품사 범주": st.column_config.TextColumn("품사 범주", width="medium"),
             "세부 품사": st.column_config.TextColumn("세부 품사", width="large"),
-            "기본형": st.column_config.TextColumn("기본형", width="medium"),
+            "기본형": st.column_config.TextColumn("대표 기본형", width="medium"),
+            "정규화형": st.column_config.TextColumn("Sudachi 정규화형", width="medium"),
+            "읽기": st.column_config.TextColumn("읽기", width="medium"),
+            "표기 변이": st.column_config.TextColumn("표기 변이", width="large"),
             "원래 품사": st.column_config.TextColumn("원래 품사", width="large"),
         },
     )
