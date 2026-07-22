@@ -180,7 +180,7 @@ st.markdown(
         <div class="page-kicker">LEXICAL ANALYSIS</div>
         <h1 class="page-title">어휘 분석</h1>
         <p class="page-copy">
-            수집한 댓글을 형태소 단위로 분석하고 빈도와 실제 사용 문맥을 확인합니다.
+            수집한 댓글을 형태소 단위로 분석하고 품사와 빈도 등의 사용 양상을 확인합니다.
         </p>
     </section>
     """,
@@ -226,11 +226,8 @@ comments_df = get_comments_dataframe()
 
 if comments_df is None:
     st.warning(
-        "분석할 댓글 데이터가 없습니다. 먼저 메인 페이지에서 댓글을 가져와 주세요."
-    )
-    st.info(
-        '메인 페이지에서 댓글 데이터프레임을 만든 직후 '
-        '`st.session_state["comments_df"] = comments_df`를 추가해야 합니다.'
+        "분석할 댓글 데이터가 없습니다. "
+        "먼저 메인 페이지에서 분석 언어를 선택하고 유튜브 댓글을 불러와 주세요."
     )
     st.stop()
 
