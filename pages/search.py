@@ -830,6 +830,7 @@ if clean_search_text:
         selected_major_pos = "전체"
         selected_detailed_pos = "전체"
         pos_frequency_df = pd.DataFrame()
+        surface_frequency_df = pd.DataFrame()
 
         if search_mode == "원문 문자열 검색":
             occurrence_spans = comments_df["댓글"].apply(
@@ -974,6 +975,36 @@ if clean_search_text:
                     ]
                 )
 
+                filtered_match_rows = [
+                    match
+                    for matches in filtered_match_series
+                    for match in matches
+                ]
+
+                if filtered_match_rows:
+                    filtered_match_df = pd.DataFrame(filtered_match_rows)
+
+                    surface_frequency_df = (
+                        filtered_match_df.groupby(
+                            ["surface", "major_pos", "detailed_pos"],
+                            as_index=False,
+                            dropna=False,
+                        )
+                        .size()
+                        .rename(
+                            columns={
+                                "surface": "실제 표기",
+                                "major_pos": "품사 범주",
+                                "detailed_pos": "세부 품사",
+                                "size": "빈도수",
+                            }
+                        )
+                        .sort_values(
+                            ["빈도수", "실제 표기", "품사 범주", "세부 품사"],
+                            ascending=[False, True, True, True],
+                        )
+                    )
+
                 pos_frequency_df = (
                     all_match_df.groupby(
                         ["major_pos", "detailed_pos"],
@@ -1088,6 +1119,42 @@ if clean_search_text:
                 "품사별 빈도표는 해당 기본형의 전체 품사 분포를 보여 줍니다. "
                 "위 필터를 적용하면 검색 빈도와 댓글 목록에는 선택한 품사만 반영됩니다."
             )
+
+        if not surface_frequency_df.empty:
+            st.markdown("#### 실제 표기 형태별 빈도")
+
+            surface_metric_col1, surface_metric_col2 = st.columns(2)
+
+            with surface_metric_col1:
+                st.metric(
+                    "실제 표기 종류 (Type)",
+                    f"{surface_frequency_df['실제 표기'].nunique():,}개",
+                )
+
+            with surface_metric_col2:
+                st.metric(
+                    "표기 형태 전체 출현 수 (Token)",
+                    f"{int(surface_frequency_df['빈도수'].sum()):,}회",
+                )
+
+            st.dataframe(
+                surface_frequency_df[
+                    ["실제 표기", "빈도수", "품사 범주", "세부 품사"]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            if analysis_language == "일본어":
+                st.caption(
+                    "SudachiPy가 같은 기본형으로 분석한 실제 표기를 각각 집계합니다. "
+                    "예를 들어 最高·サイコー·さいこう가 같은 기본형으로 분석되면 "
+                    "표기별 빈도는 따로 표시됩니다."
+                )
+            else:
+                st.caption(
+                    "같은 기본형으로 분석된 실제 활용형·굴절형과 표기 변이를 각각 집계합니다."
+                )
 
     if matched_comments.empty:
         empty_message = (
