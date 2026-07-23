@@ -1174,19 +1174,21 @@ if clean_search_text:
                 if note_parts:
                     lemma_note = " · " + " · ".join(note_parts)
 
+            card_html = (
+                f'<article class="comment-card">'
+                f'<div class="comment-meta">'
+                f'{row_number}. {safe_author}'
+                f' · {safe_date}'
+                f' · 좋아요 {safe_likes}'
+                f' · {match_label} {occurrence_count}회'
+                f'{lemma_note}'
+                f'</div>'
+                f'<div class="comment-text">{highlighted_comment}</div>'
+                f'</article>'
+            )
+
             st.markdown(
-                f"""
-                <article class="comment-card">
-                    <div class="comment-meta">
-                        {row_number}. {safe_author}
-                        · {safe_date}
-                        · 좋아요 {safe_likes}
-                        · {match_label} {occurrence_count}회
-                        {lemma_note}
-                    </div>
-                    <div class="comment-text">{highlighted_comment}</div>
-                </article>
-                """,
+                card_html,
                 unsafe_allow_html=True,
             )
 else:
