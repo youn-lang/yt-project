@@ -3,6 +3,7 @@ from collections import Counter
 
 import pandas as pd
 import plotly.express as px
+import spacy
 import streamlit as st
 from kiwipiepy import Kiwi
 from sudachipy import dictionary, tokenizer
@@ -272,6 +273,12 @@ def load_sudachi():
     return dictionary.Dictionary().create()
 
 
+@st.cache_resource
+def load_spacy_english():
+    """spaCy 영어 모델을 한 번만 불러옵니다."""
+    return spacy.load("en_core_web_sm")
+
+
 # Kiwi의 세부 품사 태그를 한국어 명칭으로 표시합니다.
 KOREAN_POS_NAMES = {
     "NNG": "일반 명사", "NNP": "고유 명사", "NNB": "의존 명사",
@@ -317,6 +324,49 @@ KOREAN_POS_GROUPS = {
 
 # 품사 선택 메뉴에 사용할 언어별 표시 순서입니다.
 # 한국어는 내용어를 먼저, 조사·어미 등의 기능어를 뒤에 배치합니다.
+# 영어 품사 대분류는 내용어를 먼저, 기능어를 뒤에 배치합니다.
+ENGLISH_POS_ORDER = [
+    "NOUN",
+    "PROPN",
+    "VERB",
+    "ADJ",
+    "ADV",
+    "PRON",
+    "NUM",
+    "INTJ",
+    "AUX",
+    "DET",
+    "ADP",
+    "PART",
+    "CCONJ",
+    "SCONJ",
+    "PUNCT",
+    "SYM",
+    "X",
+]
+
+# spaCy의 영어 세부 품사는 Penn Treebank 태그를 기준으로 배열합니다.
+ENGLISH_DETAILED_POS_ORDER = {
+    "NOUN": ["NN", "NNS"],
+    "PROPN": ["NNP", "NNPS"],
+    "VERB": ["VB", "VBP", "VBZ", "VBD", "VBG", "VBN"],
+    "ADJ": ["JJ", "JJR", "JJS"],
+    "ADV": ["RB", "RBR", "RBS", "WRB"],
+    "PRON": ["PRP", "PRP$", "WP", "WP$"],
+    "NUM": ["CD"],
+    "INTJ": ["UH"],
+    "AUX": ["MD"],
+    "DET": ["DT", "PDT", "WDT"],
+    "ADP": ["IN"],
+    "PART": ["RP", "TO", "POS"],
+    "CCONJ": ["CC"],
+    "SCONJ": ["IN"],
+    "PUNCT": [".", ",", ":", "-LRB-", "-RRB-", "``", "''"],
+    "SYM": ["SYM"],
+    "X": ["FW", "LS"],
+}
+
+
 KOREAN_POS_ORDER = [
     "명사",
     "대명사·수사",
@@ -493,6 +543,9 @@ def ordered_pos_groups(language: str, values: list[str]) -> list[str]:
     if language == "일본어":
         return order_by_priority(values, JAPANESE_POS_ORDER)
 
+    if language == "영어":
+        return order_by_priority(values, ENGLISH_POS_ORDER)
+
     return sorted(values)
 
 
@@ -508,6 +561,10 @@ def ordered_detailed_pos(
 
     if language == "일본어":
         priority = JAPANESE_DETAILED_POS_ORDER.get(pos_group, [])
+        return order_by_priority(values, priority)
+
+    if language == "영어":
+        priority = ENGLISH_DETAILED_POS_ORDER.get(pos_group, [])
         return order_by_priority(values, priority)
 
     return sorted(values)
@@ -736,40 +793,43 @@ def analyze_japanese_text(text: str, rows: list[dict]) -> None:
 
 
 def analyze_english_text(text: str, rows: list[dict]) -> None:
-    """영어 선택 시 간단한 토큰화만 제공합니다."""
-    token_pattern = re.compile(r"[A-Za-z]+(?:['’-][A-Za-z]+)*|[0-9]+|[^\\w\\s]", re.UNICODE)
-    for token_text in token_pattern.findall(text):
-        if not token_text.strip():
+    """spaCy로 영어 형태소, 기본형, 품사를 분석합니다."""
+    nlp = load_spacy_english()
+    document = nlp(text)
+
+    for token in document:
+        if token.is_space:
             continue
 
-        remaining = append_emoji_rows(rows, token_text, "영어")
+        form = token.text.strip()
+        if not form:
+            continue
+
+        remaining = append_emoji_rows(rows, form, "영어")
         if not remaining:
             continue
 
-        if re.fullmatch(r"[A-Za-z]+(?:['’-][A-Za-z]+)*", token_text):
-            category = "영문 단어"
-            detail = "영문 단어"
-            base_form = token_text.lower()
-        elif re.fullmatch(r"[0-9]+", token_text):
-            category = "숫자"
-            detail = "숫자"
-            base_form = token_text
-        else:
-            category = "기호"
-            detail = "문장부호·기호"
-            base_form = token_text
+        lemma = token.lemma_.strip()
+        if not lemma or lemma == "-PRON-":
+            lemma = form
+
+        normalized_lemma = lemma.lower()
 
         rows.append(
             {
                 "언어": "영어",
-                "형태소": token_text.lower() if category == "영문 단어" else token_text,
-                "기본형": base_form,
-                "정규화형": base_form,
+                "형태소": form,
+                "기본형": normalized_lemma,
+                "정규화형": normalized_lemma,
                 "읽기": "",
-                "표기 변이": token_text,
-                "품사 범주": category,
-                "세부 품사": detail,
-                "원래 품사": "SIMPLE_TOKENIZER",
+                "표기 변이": form,
+                "품사 범주": token.pos_ or "X",
+                "세부 품사": token.tag_ or "X",
+                "원래 품사": (
+                    f"POS={token.pos_}; "
+                    f"TAG={token.tag_}; "
+                    f"MORPH={token.morph}"
+                ),
             }
         )
 
@@ -915,14 +975,23 @@ def cached_analyze_comments(
 analyzer_name = {
     "한국어": "Kiwi",
     "일본어": "SudachiPy (SplitMode.B)",
-    "영어": "간단 영문 토크나이저",
+    "영어": "spaCy (en_core_web_sm)",
 }[analysis_language]
 
 with st.spinner(f"{analyzer_name}로 댓글 전체를 분석하는 중입니다..."):
-    lexical_df = cached_analyze_comments(
-        tuple(comments_df["댓글"].tolist()),
-        analysis_language,
-    )
+    try:
+        lexical_df = cached_analyze_comments(
+            tuple(comments_df["댓글"].tolist()),
+            analysis_language,
+        )
+    except OSError:
+        if analysis_language == "영어":
+            st.error(
+                "spaCy 영어 모델(en_core_web_sm)이 설치되지 않았습니다. "
+                "requirements.txt에 spaCy와 영어 모델을 추가한 뒤 앱을 재부트해 주세요."
+            )
+            st.stop()
+        raise
 
 
 # ------------------------------------------------------------
@@ -964,7 +1033,7 @@ elif analysis_language == "한국어":
     )
 else:
     st.caption(
-        "영어는 현재 간단 토큰화만 지원합니다. 정확한 영어 품사 분석기는 이후 단계에서 추가할 수 있습니다."
+        "영어는 spaCy로 기본형, 품사 범주, 세부 품사를 분석하며 원래 품사 정보도 함께 보존합니다."
     )
 
 csv_data = lexical_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
@@ -1197,15 +1266,38 @@ with frequency_col1:
         value=True,
         key="remove_symbols_language_specific",
     )
+
+    exclude_single_letter_english = False
+    if analysis_language == "영어":
+        exclude_single_letter_english = st.checkbox(
+            "알파벳 한 글자 단어 제외",
+            value=False,
+            key="exclude_single_letter_english",
+            help=(
+                "기본값은 포함입니다. 체크하면 I와 a를 포함한 "
+                "모든 알파벳 한 글자 단어를 출현 빈도 분석에서만 제외합니다."
+            ),
+        )
+
 with frequency_col2:
-    st.caption(
-        "선택한 언어의 전체 품사를 대상으로 기본형 기준 단어 빈도를 표시합니다. "
-        "영문 알파벳 한 글자 단어는 자동으로 제외합니다."
-    )
+    if analysis_language == "영어":
+        st.caption(
+            "영어 형태소와 품사 분석에는 한 글자 단어도 포함합니다. "
+            "필요한 경우에만 왼쪽 옵션으로 빈도 목록에서 제외할 수 있습니다."
+        )
+    else:
+        st.caption(
+            "선택한 언어의 전체 품사를 대상으로 기본형 기준 단어 빈도를 표시합니다."
+        )
 
 frequency_df = lexical_df.copy()
-one_letter_english = frequency_df["형태소"].str.fullmatch(r"[A-Za-z]", na=False)
-frequency_df = frequency_df[~one_letter_english]
+
+if analysis_language == "영어" and exclude_single_letter_english:
+    one_letter_english = frequency_df["기본형"].str.fullmatch(
+        r"[A-Za-z]",
+        na=False,
+    )
+    frequency_df = frequency_df[~one_letter_english]
 
 if remove_symbols:
     if analysis_language == "한국어":
@@ -1213,7 +1305,7 @@ if remove_symbols:
     elif analysis_language == "일본어":
         excluded_categories = {"補助記号", "記号", "空白"}
     else:
-        excluded_categories = {"기호"}
+        excluded_categories = {"PUNCT", "SYM", "SPACE"}
 
     frequency_df = frequency_df[
         ~frequency_df["품사 범주"].isin(excluded_categories)
