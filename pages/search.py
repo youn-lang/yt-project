@@ -1,8 +1,12 @@
 import html
 import re
+import unicodedata
 
 import pandas as pd
+import spacy
 import streamlit as st
+from kiwipiepy import Kiwi
+from sudachipy import dictionary, tokenizer
 
 
 # ------------------------------------------------------------
@@ -62,14 +66,14 @@ st.markdown(
     }
 
     .page-hero::after {
-        content: "Aa  가나다  🔎";
+        content: "Aa  가나다  かな  🔎";
         position: absolute;
         right: 1.5rem;
         top: 0.8rem;
         color: rgba(125, 141, 77, 0.20);
-        font-size: 2.15rem;
+        font-size: 1.8rem;
         font-weight: 900;
-        letter-spacing: 0.16rem;
+        letter-spacing: 0.12rem;
     }
 
     .page-kicker {
@@ -143,7 +147,7 @@ st.markdown(
         color: var(--deep-green);
         line-height: 1.6;
         white-space: pre-wrap;
-        word-break: break-word;
+        overflow-wrap: anywhere;
     }
 
     .highlight {
@@ -164,7 +168,7 @@ st.markdown(
         <div class="page-kicker">COMMENT SEARCH</div>
         <h1 class="page-title">검색</h1>
         <p class="page-copy">
-            특정 문자열의 전체 출현 횟수와 실제 사용된 댓글을 확인합니다.
+            수집한 댓글에서 원문 문자열이나 기본형을 검색하고 실제 사용 맥락을 확인합니다.
         </p>
     </section>
     """,
@@ -173,12 +177,10 @@ st.markdown(
 
 
 # ------------------------------------------------------------
-# 2. 메인 페이지에서 댓글 데이터 가져오기
+# 2. 메인 페이지의 댓글 데이터와 분석 언어 가져오기
 # ------------------------------------------------------------
 def get_comments_dataframe() -> pd.DataFrame | None:
-    """
-    메인 페이지에서 session_state에 저장한 댓글 데이터프레임을 가져옵니다.
-    """
+    """메인 페이지에서 session_state에 저장한 댓글을 가져옵니다."""
     candidate_keys = [
         "comments_df",
         "youtube_comments_df",
@@ -207,15 +209,33 @@ comments_df = get_comments_dataframe()
 
 if comments_df is None:
     st.warning(
-        "검색할 댓글 데이터가 없습니다. 먼저 메인 페이지에서 댓글을 가져와 주세요."
-    )
-    st.info(
-        '메인 페이지에서 댓글 데이터프레임을 만든 직후 '
-        '`st.session_state["comments_df"] = comments_df`를 추가해야 합니다.'
+        "검색할 댓글 데이터가 없습니다. "
+        "먼저 메인 페이지에서 분석 언어를 선택하고 유튜브 댓글을 불러와 주세요."
     )
     st.stop()
 
 comments_df["댓글"] = comments_df["댓글"].fillna("").astype(str)
+
+analysis_language = st.session_state.get("selected_analysis_language")
+
+if analysis_language not in {"한국어", "일본어", "영어"}:
+    st.warning(
+        "분석 언어 정보가 없습니다. 메인 페이지에서 분석 언어를 선택한 뒤 "
+        "댓글을 다시 불러와 주세요."
+    )
+    st.stop()
+
+summary_col1, summary_col2, summary_col3 = st.columns(3)
+
+with summary_col1:
+    st.metric("검색 언어", analysis_language)
+
+with summary_col2:
+    st.metric("검색 대상 댓글", f"{len(comments_df):,}개")
+
+with summary_col3:
+    non_empty_count = comments_df["댓글"].str.strip().ne("").sum()
+    st.metric("내용이 있는 댓글", f"{non_empty_count:,}개")
 
 
 # ------------------------------------------------------------
@@ -231,178 +251,577 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-search_col1, search_col2 = st.columns([2, 1])
-
-with search_col1:
-    search_text = st.text_input(
-        "찾을 문자열",
-        placeholder="예: 인공지능, football, ㅋㅋㅋ, 😂",
-    )
-
-with search_col2:
-    case_sensitive = st.checkbox(
-        "영문 대소문자 구분",
-        value=False,
-    )
-
-st.caption(
-    "형태소 단위가 아니라 입력한 문자열 자체를 검색합니다. "
-    "따라서 단어 일부, 자모 표현, 이모지, 문장부호도 검색할 수 있습니다."
+search_mode = st.radio(
+    "검색 방식",
+    options=["원문 문자열 검색", "기본형 검색"],
+    horizontal=True,
+    help=(
+        "원문 문자열 검색은 댓글에 실제로 적힌 문자 배열을 찾습니다. "
+        "기본형 검색은 형태소 분석 결과의 기본형이 같은 활용형·굴절형을 찾습니다."
+    ),
 )
 
+placeholder_by_language = {
+    "한국어": {
+        "원문 문자열 검색": "예: 인공지능, ㅋㅋㅋ, 😂",
+        "기본형 검색": "예: 보다, 좋다, 사람",
+    },
+    "일본어": {
+        "원문 문자열 검색": "例: すごい, カワイイ, 😂",
+        "기본형 검색": "例: 見る, 良い, 人",
+    },
+    "영어": {
+        "원문 문자열 검색": "Example: amazing, AI, 😂",
+        "기본형 검색": "Example: go, be, child",
+    },
+}
 
-# ------------------------------------------------------------
-# 4. 검색 함수
-# ------------------------------------------------------------
-def count_occurrences(text: str, query: str, case_sensitive: bool) -> int:
-    """
-    한 댓글 안에서 검색 문자열이 몇 번 출현하는지 계산합니다.
-    """
-    if not query:
-        return 0
+if search_mode == "원문 문자열 검색":
+    search_col1, search_col2, search_col3 = st.columns([2, 1, 1])
 
-    flags = 0 if case_sensitive else re.IGNORECASE
-    return len(re.findall(re.escape(query), text, flags=flags))
+    with search_col1:
+        search_text = st.text_input(
+            "찾을 문자열",
+            placeholder=placeholder_by_language[analysis_language][search_mode],
+            key="literal_search_text",
+        )
 
+    with search_col2:
+        case_sensitive = st.checkbox(
+            "영문 대소문자 구분",
+            value=False,
+            help=(
+                "해제하면 영어의 대문자와 소문자를 같은 문자로 검색합니다. "
+                "한국어와 일본어 문자열에는 영향을 주지 않습니다."
+            ),
+        )
 
-def highlight_text(text: str, query: str, case_sensitive: bool) -> str:
-    """
-    댓글에서 검색 문자열을 강조 표시합니다.
-    먼저 HTML 특수문자를 이스케이프하여 화면 구조가 깨지지 않게 합니다.
-    """
-    safe_text = html.escape(text)
-    safe_query = html.escape(query)
+    with search_col3:
+        normalize_unicode = st.checkbox(
+            "표기 폭 정규화",
+            value=True,
+            help=(
+                "유니코드 NFKC 정규화를 적용합니다. 일본어의 전각·반각 가나와 "
+                "영어의 전각·반각 알파벳처럼 폭만 다른 표기를 함께 검색합니다."
+            ),
+        )
 
-    flags = 0 if case_sensitive else re.IGNORECASE
+    st.caption(
+        "댓글 원문에 실제로 나타난 문자열을 검색합니다. "
+        "활용형이나 굴절형은 서로 다른 문자열로 취급됩니다."
+    )
+else:
+    search_text = st.text_input(
+        "찾을 기본형",
+        placeholder=placeholder_by_language[analysis_language][search_mode],
+        key="lemma_search_text",
+    )
+    case_sensitive = False
+    normalize_unicode = True
 
-    return re.sub(
-        re.escape(safe_query),
-        lambda match: (
-            f'<span class="highlight">{match.group(0)}</span>'
-        ),
-        safe_text,
-        flags=flags,
+    analyzer_description = {
+        "한국어": "Kiwi",
+        "일본어": "SudachiPy",
+        "영어": "spaCy",
+    }[analysis_language]
+
+    st.caption(
+        f"{analyzer_description}로 검색어와 댓글을 분석하여 기본형이 같은 형태를 찾습니다. "
+        "예를 들어 영어 go는 went·gone을, 일본어 見る는 見た·見て를 함께 찾을 수 있습니다."
     )
 
 
 # ------------------------------------------------------------
-# 5. 검색 결과
+# 4. 다국어 문자열 검색과 강조 표시
 # ------------------------------------------------------------
-if search_text:
-    search_text = search_text.strip()
+def split_search_units(text: str) -> list[tuple[str, int, int]]:
+    """
+    원문을 정규화 가능한 단위로 나눕니다.
 
-    if search_text:
-        occurrence_counts = comments_df["댓글"].apply(
-            lambda text: count_occurrences(
-                text,
-                search_text,
-                case_sensitive,
+    결합 문자와 일본어 반각 탁점·반탁점은 앞 문자와 같은 단위로 묶어
+    NFKC 정규화 후에도 원문의 위치를 추적할 수 있게 합니다.
+    """
+    units: list[tuple[str, int, int]] = []
+
+    for index, character in enumerate(text):
+        is_combining = unicodedata.combining(character) != 0
+        is_halfwidth_mark = character in {"ﾞ", "ﾟ"}
+
+        if units and (is_combining or is_halfwidth_mark):
+            previous_text, start, _ = units[-1]
+            units[-1] = (previous_text + character, start, index + 1)
+        else:
+            units.append((character, index, index + 1))
+
+    return units
+
+
+def transform_for_search(
+    text: str,
+    case_sensitive: bool,
+    normalize_unicode: bool,
+) -> tuple[str, list[tuple[int, int]]]:
+    """
+    검색용 문자열과 각 검색 문자가 가리키는 원문 범위를 반환합니다.
+    """
+    transformed_parts: list[str] = []
+    source_ranges: list[tuple[int, int]] = []
+
+    for unit, start, end in split_search_units(text):
+        transformed = (
+            unicodedata.normalize("NFKC", unit)
+            if normalize_unicode
+            else unit
+        )
+
+        if not case_sensitive:
+            transformed = transformed.casefold()
+
+        transformed_parts.append(transformed)
+        source_ranges.extend([(start, end)] * len(transformed))
+
+    return "".join(transformed_parts), source_ranges
+
+
+def find_occurrence_spans(
+    text: str,
+    query: str,
+    case_sensitive: bool,
+    normalize_unicode: bool,
+) -> list[tuple[int, int]]:
+    """원문에서 검색 문자열의 비중첩 출현 범위를 찾습니다."""
+    transformed_text, source_ranges = transform_for_search(
+        text,
+        case_sensitive,
+        normalize_unicode,
+    )
+    transformed_query, _ = transform_for_search(
+        query,
+        case_sensitive,
+        normalize_unicode,
+    )
+
+    if not transformed_query:
+        return []
+
+    normalized_spans: list[tuple[int, int]] = []
+    search_start = 0
+
+    while True:
+        match_start = transformed_text.find(
+            transformed_query,
+            search_start,
+        )
+
+        if match_start == -1:
+            break
+
+        match_end = match_start + len(transformed_query)
+        normalized_spans.append((match_start, match_end))
+        search_start = match_end
+
+    original_spans: list[tuple[int, int]] = []
+
+    for match_start, match_end in normalized_spans:
+        if match_start >= len(source_ranges) or match_end <= 0:
+            continue
+
+        original_start = source_ranges[match_start][0]
+        original_end = source_ranges[match_end - 1][1]
+
+        if original_spans and original_start < original_spans[-1][1]:
+            original_start = original_spans[-1][1]
+
+        if original_start < original_end:
+            original_spans.append((original_start, original_end))
+
+    return original_spans
+
+
+def highlight_text(text: str, spans: list[tuple[int, int]]) -> str:
+    """찾은 원문 범위를 HTML로 안전하게 강조합니다."""
+    if not spans:
+        return html.escape(text)
+
+    output: list[str] = []
+    cursor = 0
+
+    for start, end in spans:
+        output.append(html.escape(text[cursor:start]))
+        output.append(
+            '<span class="highlight">'
+            + html.escape(text[start:end])
+            + "</span>"
+        )
+        cursor = end
+
+    output.append(html.escape(text[cursor:]))
+    return "".join(output)
+
+
+# ------------------------------------------------------------
+# 5. 언어별 기본형 분석
+# ------------------------------------------------------------
+@st.cache_resource
+def load_kiwi() -> Kiwi:
+    return Kiwi()
+
+
+@st.cache_resource
+def load_sudachi():
+    return dictionary.Dictionary().create()
+
+
+@st.cache_resource
+def load_spacy_english():
+    return spacy.load("en_core_web_sm")
+
+
+JAPANESE_LEMMA_ALIASES = {
+    "みる": "見る",
+    "見れる": "見る",
+    "みれる": "見る",
+}
+
+
+def make_korean_base_form(form: str, tag: str) -> str:
+    if tag.startswith(("VV", "VA", "VX", "VCP", "VCN")):
+        return f"{form}다"
+    if tag == "SL":
+        return form.lower()
+    return form
+
+
+def normalize_japanese_lemma(
+    dictionary_form: str,
+    normalized_form: str,
+    major_pos: str,
+) -> str:
+    candidate = normalized_form
+
+    if not candidate or candidate == "*":
+        candidate = dictionary_form
+
+    if not candidate or candidate == "*":
+        candidate = ""
+
+    if major_pos in {"動詞", "形容詞", "形状詞", "助動詞"}:
+        return JAPANESE_LEMMA_ALIASES.get(candidate, candidate)
+
+    return candidate
+
+
+def analyze_korean_tokens(text: str) -> list[dict]:
+    tokens: list[dict] = []
+
+    for token in load_kiwi().tokenize(text):
+        form = token.form.strip()
+        if not form:
+            continue
+
+        start = int(token.start)
+        end = start + int(token.len)
+        tokens.append(
+            {
+                "surface": text[start:end],
+                "lemma": make_korean_base_form(form, token.tag),
+                "pos": token.tag,
+                "start": start,
+                "end": end,
+            }
+        )
+
+    return tokens
+
+
+def analyze_japanese_tokens(text: str) -> list[dict]:
+    tokens: list[dict] = []
+    sudachi = load_sudachi()
+
+    for morpheme in sudachi.tokenize(text, tokenizer.Tokenizer.SplitMode.B):
+        form = morpheme.surface()
+        if not form.strip():
+            continue
+
+        pos_tuple = tuple(morpheme.part_of_speech())
+        major_pos = pos_tuple[0] if pos_tuple else "未分類"
+        if major_pos == "空白":
+            continue
+
+        dictionary_form = morpheme.dictionary_form()
+        if not dictionary_form or dictionary_form == "*":
+            dictionary_form = form
+
+        normalized_form = morpheme.normalized_form()
+        if not normalized_form or normalized_form == "*":
+            normalized_form = dictionary_form
+
+        lemma = normalize_japanese_lemma(
+            dictionary_form,
+            normalized_form,
+            major_pos,
+        )
+
+        tokens.append(
+            {
+                "surface": form,
+                "lemma": lemma,
+                "pos": major_pos,
+                "start": int(morpheme.begin()),
+                "end": int(morpheme.end()),
+            }
+        )
+
+    return tokens
+
+
+def analyze_english_tokens(text: str) -> list[dict]:
+    tokens: list[dict] = []
+
+    for token in load_spacy_english()(text):
+        if token.is_space:
+            continue
+
+        lemma = token.lemma_.strip()
+        if not lemma or lemma == "-PRON-":
+            lemma = token.text
+
+        tokens.append(
+            {
+                "surface": token.text,
+                "lemma": lemma.lower(),
+                "pos": token.pos_ or "X",
+                "start": int(token.idx),
+                "end": int(token.idx + len(token.text)),
+            }
+        )
+
+    return tokens
+
+
+def analyze_tokens(text: str, language: str) -> list[dict]:
+    if language == "한국어":
+        return analyze_korean_tokens(text)
+    if language == "일본어":
+        return analyze_japanese_tokens(text)
+    return analyze_english_tokens(text)
+
+
+@st.cache_data(show_spinner=False)
+def cached_analyze_tokens(text: str, language: str) -> list[dict]:
+    return analyze_tokens(text, language)
+
+
+def normalize_lemma_for_comparison(lemma: str, language: str) -> str:
+    normalized = unicodedata.normalize("NFKC", str(lemma).strip())
+    if language == "영어":
+        return normalized.casefold()
+    return normalized
+
+
+def extract_query_lemmas(query: str, language: str) -> list[str]:
+    """검색어에서 비교에 사용할 핵심 기본형을 추출합니다."""
+    analyzed = analyze_tokens(query, language)
+
+    ignored_pos = {
+        "한국어": {
+            "JKS", "JKC", "JKG", "JKO", "JKB", "JKV", "JKQ", "JX", "JC",
+            "EP", "EF", "EC", "ETN", "ETM", "SF", "SP", "SS", "SSO", "SSC",
+            "SE", "SO", "SW",
+        },
+        "일본어": {"助詞", "助動詞", "補助記号", "記号", "空白"},
+        "영어": {"PUNCT", "SYM", "SPACE"},
+    }[language]
+
+    content_lemmas = [
+        normalize_lemma_for_comparison(token["lemma"], language)
+        for token in analyzed
+        if token["pos"] not in ignored_pos and str(token["lemma"]).strip()
+    ]
+
+    if content_lemmas:
+        return list(dict.fromkeys(content_lemmas))
+
+    direct = normalize_lemma_for_comparison(query, language)
+    return [direct] if direct else []
+
+
+def find_lemma_matches(
+    text: str,
+    target_lemmas: set[str],
+    language: str,
+) -> tuple[list[tuple[int, int]], list[str]]:
+    spans: list[tuple[int, int]] = []
+    matched_lemmas: list[str] = []
+
+    for token in cached_analyze_tokens(text, language):
+        token_lemma = normalize_lemma_for_comparison(token["lemma"], language)
+
+        if token_lemma in target_lemmas:
+            spans.append((int(token["start"]), int(token["end"])))
+            matched_lemmas.append(str(token["lemma"]))
+
+    return spans, matched_lemmas
+
+
+# ------------------------------------------------------------
+# 6. 검색 결과
+# ------------------------------------------------------------
+clean_search_text = search_text.strip()
+
+if clean_search_text:
+    try:
+        if search_mode == "원문 문자열 검색":
+            occurrence_spans = comments_df["댓글"].apply(
+                lambda text: find_occurrence_spans(
+                    text=str(text),
+                    query=clean_search_text,
+                    case_sensitive=case_sensitive,
+                    normalize_unicode=normalize_unicode,
+                )
             )
-        )
+            matched_lemmas_series = pd.Series(
+                [[] for _ in range(len(comments_df))],
+                index=comments_df.index,
+            )
+            target_lemmas: list[str] = []
+        else:
+            with st.spinner("검색어와 댓글의 기본형을 분석하는 중입니다..."):
+                target_lemmas = extract_query_lemmas(
+                    clean_search_text,
+                    analysis_language,
+                )
+                target_lemma_set = set(target_lemmas)
+                lemma_results = comments_df["댓글"].apply(
+                    lambda text: find_lemma_matches(
+                        str(text),
+                        target_lemma_set,
+                        analysis_language,
+                    )
+                )
+                occurrence_spans = lemma_results.apply(lambda result: result[0])
+                matched_lemmas_series = lemma_results.apply(lambda result: result[1])
+    except OSError:
+        if analysis_language == "영어":
+            st.error(
+                "spaCy 영어 모델(en_core_web_sm)을 불러오지 못했습니다. "
+                "requirements.txt와 Streamlit 설치 로그를 확인해 주세요."
+            )
+            st.stop()
+        raise
 
-        matched_mask = occurrence_counts > 0
-        matched_comments = comments_df.loc[matched_mask].copy()
-        matched_comments["검색 문자열 출현 횟수"] = (
-            occurrence_counts.loc[matched_mask].astype(int)
-        )
+    occurrence_counts = occurrence_spans.apply(len)
+    matched_mask = occurrence_counts > 0
+    matched_comments = comments_df.loc[matched_mask].copy()
+    matched_comments["검색 항목 출현 횟수"] = occurrence_counts.loc[matched_mask].astype(int)
+    matched_comments["_검색_범위"] = occurrence_spans.loc[matched_mask]
+    matched_comments["_일치_기본형"] = matched_lemmas_series.loc[matched_mask]
 
-        total_occurrences = int(
-            matched_comments["검색 문자열 출현 횟수"].sum()
+    total_occurrences = int(matched_comments["검색 항목 출현 횟수"].sum())
+
+    st.markdown(
+        """
+        <div class="section-label">
+            <span class="section-number">2</span>
+            검색 결과
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    metric_col1, metric_col2, metric_col3 = st.columns(3)
+
+    with metric_col1:
+        metric_label = "검색 문자열" if search_mode == "원문 문자열 검색" else "검색 기본형"
+        st.metric(metric_label, clean_search_text)
+
+    with metric_col2:
+        st.metric("전체 출현 빈도", f"{total_occurrences:,}회")
+
+    with metric_col3:
+        st.metric("포함된 댓글", f"{len(matched_comments):,}개")
+
+    if search_mode == "기본형 검색":
+        if target_lemmas:
+            st.caption(
+                "분석된 검색 기본형: "
+                + ", ".join(html.escape(lemma) for lemma in target_lemmas)
+            )
+        else:
+            st.warning("검색어에서 유효한 기본형을 추출하지 못했습니다.")
+
+    if matched_comments.empty:
+        empty_message = (
+            "입력한 문자열이 사용된 댓글이 없습니다."
+            if search_mode == "원문 문자열 검색"
+            else "같은 기본형으로 분석된 형태가 사용된 댓글이 없습니다."
         )
+        st.info(empty_message)
+    else:
+        if search_mode == "원문 문자열 검색":
+            normalization_note = (
+                " 표기 폭 정규화가 켜져 있으므로 전각·반각 차이는 같은 표기로 처리됩니다."
+                if normalize_unicode
+                else ""
+            )
+            st.caption(
+                "한 댓글에서 같은 문자열이 여러 번 나오면 모두 출현 빈도에 포함됩니다."
+                + normalization_note
+            )
+        else:
+            st.caption(
+                "댓글에 실제로 나타난 활용형·굴절형을 강조합니다. "
+                "동일한 표면형이라도 분석기가 다른 기본형을 부여하면 검색 결과에서 제외될 수 있습니다."
+            )
 
         st.markdown(
             """
             <div class="section-label">
-                <span class="section-number">2</span>
-                검색 결과
+                <span class="section-number">3</span>
+                검색 항목이 사용된 댓글
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-        metric_col1, metric_col2, metric_col3 = st.columns(3)
+        matched_comments = matched_comments.sort_values(
+            "검색 항목 출현 횟수",
+            ascending=False,
+            kind="stable",
+        )
 
-        with metric_col1:
-            st.metric(
-                "검색 문자열",
-                search_text,
-            )
+        for row_number, (_, row) in enumerate(matched_comments.iterrows(), start=1):
+            author = row.get("작성자 ID", "작성자 정보 없음")
+            published_at = row.get("작성 일시", "")
+            likes = row.get("좋아요", row.get("좋아요 수", 0))
+            occurrence_count = int(row.get("검색 항목 출현 횟수", 0))
+            comment_text = str(row.get("댓글", ""))
+            spans = row.get("_검색_범위", [])
 
-        with metric_col2:
-            st.metric(
-                "전체 출현 빈도",
-                f"{total_occurrences:,}회",
-            )
+            safe_author = html.escape(str(author))
+            safe_date = html.escape(str(published_at))
+            safe_likes = html.escape(str(likes))
+            highlighted_comment = highlight_text(comment_text, spans)
 
-        with metric_col3:
-            st.metric(
-                "포함된 댓글",
-                f"{len(matched_comments):,}개",
-            )
-
-        if matched_comments.empty:
-            st.info("입력한 문자열이 사용된 댓글이 없습니다.")
-
-        else:
-            st.caption(
-                "한 댓글에서 같은 문자열이 여러 번 나오면 모두 출현 빈도에 포함됩니다."
-            )
+            match_label = "검색 문자열" if search_mode == "원문 문자열 검색" else "기본형 일치"
+            lemma_note = ""
+            if search_mode == "기본형 검색":
+                matched_lemmas = list(dict.fromkeys(row.get("_일치_기본형", [])))
+                if matched_lemmas:
+                    lemma_note = " · 일치 기본형 " + html.escape(", ".join(matched_lemmas))
 
             st.markdown(
-                """
-                <div class="section-label">
-                    <span class="section-number">3</span>
-                    문자열이 사용된 댓글
+                f"""
+                <div class="comment-card">
+                    <div class="comment-meta">
+                        {row_number}. {safe_author}
+                        · {safe_date}
+                        · 좋아요 {safe_likes}
+                        · {match_label} {occurrence_count}회{lemma_note}
+                    </div>
+                    <div class="comment-text">{highlighted_comment}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
-            # 출현 횟수가 많은 댓글을 먼저 보여주고,
-            # 같은 횟수라면 원래 수집 순서를 유지합니다.
-            matched_comments = matched_comments.sort_values(
-                "검색 문자열 출현 횟수",
-                ascending=False,
-                kind="stable",
-            )
-
-            for row_number, (_, row) in enumerate(
-                matched_comments.iterrows(),
-                start=1,
-            ):
-                author = row.get("작성자 ID", "작성자 정보 없음")
-                published_at = row.get("작성 일시", "")
-                likes = row.get(
-                    "좋아요",
-                    row.get("좋아요 수", 0),
-                )
-                occurrence_count = row.get(
-                    "검색 문자열 출현 횟수",
-                    0,
-                )
-                comment_text = row.get("댓글", "")
-
-                safe_author = html.escape(str(author))
-                safe_date = html.escape(str(published_at))
-                highlighted_comment = highlight_text(
-                    str(comment_text),
-                    search_text,
-                    case_sensitive,
-                )
-
-                st.markdown(
-                    f"""
-                    <div class="comment-card">
-                        <div class="comment-meta">
-                            {row_number}. {safe_author}
-                            · {safe_date}
-                            · 좋아요 {likes}
-                            · 검색 문자열 {occurrence_count}회
-                        </div>
-                        <div class="comment-text">
-                            {highlighted_comment}
-                        </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
