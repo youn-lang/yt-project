@@ -1,10 +1,13 @@
+import io
 import re
 from collections import Counter
+from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
 import spacy
 import streamlit as st
+from wordcloud import WordCloud
 from kiwipiepy import Kiwi
 from sudachipy import dictionary, tokenizer
 
@@ -972,6 +975,94 @@ def cached_analyze_comments(
     return analyze_comments(pd.Series(comment_tuple), language)
 
 
+
+# ------------------------------------------------------------
+# Word Cloud용 보조 함수
+# ------------------------------------------------------------
+def find_wordcloud_font(language: str) -> str | None:
+    """Streamlit Cloud와 일반 Linux 환경에서 사용할 글꼴을 찾습니다."""
+    cjk_candidates = [
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJKkr-Regular.otf",
+        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+        "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
+    ]
+    latin_candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+    ]
+
+    candidates = cjk_candidates + latin_candidates if language in {"한국어", "일본어"} else latin_candidates + cjk_candidates
+
+    for candidate in candidates:
+        if Path(candidate).exists():
+            return candidate
+
+    return None
+
+
+@st.cache_data(show_spinner=False)
+def build_surface_token_dataframe(
+    comment_tuple: tuple[str, ...],
+    language: str,
+) -> pd.DataFrame:
+    """댓글을 토큰 단위로 다시 분석해 실제 표기형 빈도 계산에 사용합니다."""
+    rows: list[dict] = []
+
+    for comment in comment_tuple:
+        if language == "한국어":
+            analyze_korean_text(str(comment), rows)
+        elif language == "일본어":
+            analyze_japanese_text(str(comment), rows)
+        else:
+            analyze_english_text(str(comment), rows)
+
+    if not rows:
+        return pd.DataFrame(
+            columns=["기본형", "실제 표기", "품사 범주", "세부 품사", "빈도수"]
+        )
+
+    token_df = pd.DataFrame(rows).rename(columns={"표기 변이": "실제 표기"})
+
+    return (
+        token_df.groupby(
+            ["기본형", "실제 표기", "품사 범주", "세부 품사"],
+            as_index=False,
+            dropna=False,
+        )
+        .size()
+        .rename(columns={"size": "빈도수"})
+    )
+
+
+def make_wordcloud_png(
+    frequencies: dict[str, int],
+    font_path: str | None,
+    width: int,
+    height: int,
+    transparent: bool,
+) -> tuple[WordCloud, bytes]:
+    """빈도 사전으로 Word Cloud와 PNG 바이트를 생성합니다."""
+    cloud = WordCloud(
+        width=width,
+        height=height,
+        background_color=None if transparent else "white",
+        mode="RGBA" if transparent else "RGB",
+        font_path=font_path,
+        max_words=len(frequencies),
+        prefer_horizontal=0.9,
+        relative_scaling=0.45,
+        collocations=False,
+        margin=4,
+        random_state=42,
+    ).generate_from_frequencies(frequencies)
+
+    image = cloud.to_image()
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return cloud, buffer.getvalue()
+
+
 analyzer_name = {
     "한국어": "Kiwi",
     "일본어": "SudachiPy (SplitMode.B)",
@@ -1394,3 +1485,229 @@ else:
             use_container_width=True,
             config={"displayModeBar": False},
         )
+
+# ------------------------------------------------------------
+# 7. Word Cloud
+# ------------------------------------------------------------
+st.markdown(
+    """
+    <div class="section-label">
+        <span class="section-number">4</span>
+        Word Cloud
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.caption(
+    "선택한 품사 범주에 속하는 단어만 사용해 발표 도입부 등에 활용할 수 있는 "
+    "Word Cloud를 만듭니다. 정확한 빈도는 오른쪽 표에서 함께 확인할 수 있습니다."
+)
+
+surface_token_df = build_surface_token_dataframe(
+    tuple(comments_df["댓글"].astype(str).tolist()),
+    analysis_language,
+)
+
+if surface_token_df.empty:
+    st.warning("Word Cloud를 만들 수 있는 형태소가 없습니다.")
+else:
+    cloud_control_col1, cloud_control_col2, cloud_control_col3 = st.columns(3)
+
+    major_values = surface_token_df["품사 범주"].dropna().astype(str).unique().tolist()
+    major_options = ["전체"] + ordered_pos_groups(analysis_language, major_values)
+
+    with cloud_control_col1:
+        cloud_major_pos = st.selectbox(
+            "품사 범주",
+            options=major_options,
+            key="wordcloud_major_pos",
+        )
+
+    if cloud_major_pos == "전체":
+        cloud_detail_source = surface_token_df
+    else:
+        cloud_detail_source = surface_token_df[
+            surface_token_df["품사 범주"] == cloud_major_pos
+        ]
+
+    detail_values = (
+        cloud_detail_source["세부 품사"]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
+    )
+    detail_options = ["전체"]
+
+    if cloud_major_pos == "전체":
+        detail_options += sorted(detail_values)
+    else:
+        detail_options += ordered_detailed_pos(
+            analysis_language,
+            cloud_major_pos,
+            detail_values,
+        )
+
+    current_cloud_detail = st.session_state.get("wordcloud_detailed_pos", "전체")
+    if current_cloud_detail not in detail_options:
+        st.session_state["wordcloud_detailed_pos"] = "전체"
+
+    with cloud_control_col2:
+        cloud_detailed_pos = st.selectbox(
+            "세부 품사",
+            options=detail_options,
+            key="wordcloud_detailed_pos",
+        )
+
+    with cloud_control_col3:
+        cloud_unit = st.radio(
+            "표시 단위",
+            options=["기본형", "실제 표기"],
+            horizontal=True,
+            key="wordcloud_unit",
+            help=(
+                "기본형은 활용형과 굴절형을 통합합니다. 실제 표기는 댓글에 나타난 "
+                "最高·サイコー·さいこう 같은 형태를 각각 따로 표시합니다."
+            ),
+        )
+
+    cloud_option_col1, cloud_option_col2, cloud_option_col3, cloud_option_col4 = st.columns(4)
+
+    with cloud_option_col1:
+        cloud_min_frequency = st.number_input(
+            "최소 빈도",
+            min_value=1,
+            max_value=1000,
+            value=2,
+            step=1,
+            key="wordcloud_min_frequency",
+        )
+
+    with cloud_option_col2:
+        cloud_max_words = st.slider(
+            "표시할 단어 수",
+            min_value=10,
+            max_value=200,
+            value=60,
+            step=10,
+            key="wordcloud_max_words",
+        )
+
+    with cloud_option_col3:
+        cloud_ratio = st.selectbox(
+            "이미지 비율",
+            options=["가로형 16:9", "정사각형 1:1"],
+            key="wordcloud_ratio",
+        )
+
+    with cloud_option_col4:
+        cloud_transparent = st.checkbox(
+            "투명 배경",
+            value=False,
+            key="wordcloud_transparent",
+        )
+
+    cloud_df = surface_token_df.copy()
+
+    if cloud_major_pos != "전체":
+        cloud_df = cloud_df[cloud_df["품사 범주"] == cloud_major_pos]
+
+    if cloud_detailed_pos != "전체":
+        cloud_df = cloud_df[cloud_df["세부 품사"] == cloud_detailed_pos]
+
+    display_column = "기본형" if cloud_unit == "기본형" else "실제 표기"
+
+    cloud_frequency_df = (
+        cloud_df.groupby(display_column, as_index=False, dropna=False)["빈도수"]
+        .sum()
+        .rename(columns={display_column: "단어"})
+    )
+    cloud_frequency_df["단어"] = cloud_frequency_df["단어"].astype(str).str.strip()
+    cloud_frequency_df = cloud_frequency_df[
+        (cloud_frequency_df["단어"] != "")
+        & (cloud_frequency_df["빈도수"] >= int(cloud_min_frequency))
+    ]
+    cloud_frequency_df = cloud_frequency_df.sort_values(
+        ["빈도수", "단어"],
+        ascending=[False, True],
+    ).head(int(cloud_max_words))
+
+    if cloud_frequency_df.empty:
+        st.info("현재 조건과 최소 빈도를 만족하는 단어가 없습니다.")
+    else:
+        font_path = find_wordcloud_font(analysis_language)
+
+        if analysis_language in {"한국어", "일본어"} and font_path is None:
+            st.error(
+                "한글·일본어를 표시할 수 있는 글꼴을 찾지 못했습니다. "
+                "Streamlit Cloud의 packages.txt에 fonts-noto-cjk를 추가해 주세요."
+            )
+        else:
+            if cloud_ratio == "가로형 16:9":
+                cloud_width, cloud_height = 1600, 900
+            else:
+                cloud_width, cloud_height = 1200, 1200
+
+            frequency_dict = {
+                str(row["단어"]): int(row["빈도수"])
+                for _, row in cloud_frequency_df.iterrows()
+            }
+
+            with st.spinner("Word Cloud를 생성하는 중입니다..."):
+                cloud, cloud_png = make_wordcloud_png(
+                    frequencies=frequency_dict,
+                    font_path=font_path,
+                    width=cloud_width,
+                    height=cloud_height,
+                    transparent=cloud_transparent,
+                )
+
+            cloud_image_col, cloud_table_col = st.columns([1.65, 1])
+
+            with cloud_image_col:
+                st.image(
+                    cloud_png,
+                    caption=(
+                        f"{analysis_language} · {cloud_major_pos} · "
+                        f"{cloud_detailed_pos} · {cloud_unit} 기준"
+                    ),
+                    use_container_width=True,
+                )
+
+                st.download_button(
+                    "Word Cloud PNG 다운로드",
+                    data=cloud_png,
+                    file_name=(
+                        f"youtube_wordcloud_{analysis_language}_"
+                        f"{cloud_major_pos}_{cloud_unit}.png"
+                    ),
+                    mime="image/png",
+                    use_container_width=True,
+                )
+
+            with cloud_table_col:
+                st.markdown("#### 사용된 단어와 빈도")
+                st.metric("표시 단어 수", f"{len(cloud_frequency_df):,}개")
+                st.dataframe(
+                    cloud_frequency_df[["단어", "빈도수"]],
+                    use_container_width=True,
+                    hide_index=True,
+                    height=min(650, 38 + 35 * len(cloud_frequency_df)),
+                    column_config={
+                        "단어": st.column_config.TextColumn("단어"),
+                        "빈도수": st.column_config.NumberColumn("빈도수", format="%d"),
+                    },
+                )
+
+            if cloud_unit == "실제 표기":
+                st.caption(
+                    "실제 표기 기준에서는 대소문자, 한자·가나, 활용형 등의 표면형이 "
+                    "서로 다른 단어로 표시됩니다."
+                )
+            else:
+                st.caption(
+                    "기본형 기준에서는 분석기가 같은 기본형으로 처리한 활용형·굴절형과 "
+                    "표기 변이를 합산합니다."
+                )
+
