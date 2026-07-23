@@ -1,5 +1,6 @@
 requests
 plotly
+wordcloud
 kiwipiepy
 sudachipy
 sudachidict-core
