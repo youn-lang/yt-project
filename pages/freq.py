@@ -315,6 +315,203 @@ KOREAN_POS_GROUPS = {
     "기타": {"USER0"},
 }
 
+# 품사 선택 메뉴에 사용할 언어별 표시 순서입니다.
+# 한국어는 내용어를 먼저, 조사·어미 등의 기능어를 뒤에 배치합니다.
+KOREAN_POS_ORDER = [
+    "명사",
+    "대명사·수사",
+    "동사",
+    "형용사",
+    "관형사",
+    "부사",
+    "감탄사",
+    "접사·어근",
+    "조사",
+    "어미",
+    "영문",
+    "한자",
+    "숫자",
+    "이모지",
+    "문장부호",
+    "기타 기호",
+    "웹 표현",
+    "기타",
+]
+
+# 한국어 세부 품사는 실제 댓글에서 상대적으로 자주 관찰되는 항목을 앞에 둡니다.
+KOREAN_DETAILED_POS_ORDER = {
+    "명사": ["일반 명사", "고유 명사", "의존 명사"],
+    "대명사·수사": ["대명사", "수사"],
+    "동사": ["동사", "보조 용언", "긍정 지정사", "부정 지정사"],
+    "형용사": ["형용사"],
+    "관형사": ["관형사"],
+    "부사": ["일반 부사", "접속 부사"],
+    "감탄사": ["감탄사"],
+    "접사·어근": [
+        "명사 파생 접미사",
+        "동사 파생 접미사",
+        "형용사 파생 접미사",
+        "접두사",
+        "어근",
+        "덧붙은 받침",
+    ],
+    "조사": [
+        "보조사",
+        "주격 조사",
+        "목적격 조사",
+        "부사격 조사",
+        "관형격 조사",
+        "접속 조사",
+        "인용격 조사",
+        "보격 조사",
+        "호격 조사",
+    ],
+    "어미": [
+        "종결 어미",
+        "연결 어미",
+        "선어말 어미",
+        "관형형 전성 어미",
+        "명사형 전성 어미",
+    ],
+    "문장부호": [
+        "마침표·물음표·느낌표",
+        "쉼표·가운뎃점·콜론",
+        "괄호·따옴표",
+        "여는 괄호·따옴표",
+        "닫는 괄호·따옴표",
+        "줄임표",
+        "붙임표",
+    ],
+    "웹 표현": ["URL", "해시태그", "멘션", "이메일", "일련번호"],
+}
+
+# 일본어 대분류는 한국어 배열과 가능한 한 대응하도록 구성합니다.
+# 내용어를 앞에, 조사·조동사 같은 기능어를 뒤에 둡니다.
+JAPANESE_POS_ORDER = [
+    "名詞",
+    "代名詞",
+    "動詞",
+    "形容詞",
+    "形状詞",
+    "連体詞",
+    "副詞",
+    "接続詞",
+    "感動詞",
+    "接頭辞",
+    "接尾辞",
+    "助詞",
+    "助動詞",
+    "絵文字",
+    "記号",
+    "補助記号",
+    "空白",
+    "未分類",
+]
+
+# Sudachi 세부 품사는 일본어 내부에서 일반적으로 자주 나타나는 순서를 우선합니다.
+# 정확히 일치하지 않는 새 항목은 같은 대분류의 뒤쪽에 자동으로 배치됩니다.
+JAPANESE_DETAILED_POS_ORDER = {
+    "名詞": [
+        "名詞-普通名詞-一般",
+        "名詞-固有名詞-一般",
+        "名詞-普通名詞-サ変可能",
+        "名詞-普通名詞-形状詞可能",
+        "名詞-数詞",
+        "名詞-固有名詞-人名",
+        "名詞-固有名詞-地名",
+        "名詞-助動詞語幹",
+    ],
+    "代名詞": ["代名詞"],
+    "動詞": [
+        "動詞-一般",
+        "動詞-非自立可能",
+    ],
+    "形容詞": [
+        "形容詞-一般",
+        "形容詞-非自立可能",
+    ],
+    "形状詞": [
+        "形状詞-一般",
+        "形状詞-タリ",
+        "形状詞-助動詞語幹",
+    ],
+    "連体詞": ["連体詞"],
+    "副詞": ["副詞"],
+    "接続詞": ["接続詞"],
+    "感動詞": [
+        "感動詞-一般",
+        "感動詞-フィラー",
+    ],
+    "接頭辞": ["接頭辞"],
+    "接尾辞": [
+        "接尾辞-名詞的-一般",
+        "接尾辞-名詞的-サ変可能",
+        "接尾辞-形容詞的",
+        "接尾辞-動詞的",
+    ],
+    "助詞": [
+        "助詞-格助詞",
+        "助詞-係助詞",
+        "助詞-接続助詞",
+        "助詞-副助詞",
+        "助詞-終助詞",
+        "助詞-準体助詞",
+    ],
+    "助動詞": ["助動詞"],
+    "記号": ["記号-一般", "記号-文字"],
+    "補助記号": [
+        "補助記号-句点",
+        "補助記号-読点",
+        "補助記号-括弧開",
+        "補助記号-括弧閉",
+        "補助記号-一般",
+        "補助記号-AA-一般",
+        "補助記号-AA-顔文字",
+    ],
+}
+
+
+def order_by_priority(values: list[str], priority: list[str]) -> list[str]:
+    """우선순위표에 있는 항목을 먼저 배치하고 나머지는 이름순으로 붙입니다."""
+    unique_values = list(dict.fromkeys(str(value) for value in values))
+    priority_index = {value: index for index, value in enumerate(priority)}
+
+    return sorted(
+        unique_values,
+        key=lambda value: (
+            priority_index.get(value, len(priority)),
+            value,
+        ),
+    )
+
+
+def ordered_pos_groups(language: str, values: list[str]) -> list[str]:
+    """선택한 분석 언어에 맞게 품사 대분류 순서를 정합니다."""
+    if language == "한국어":
+        return order_by_priority(values, KOREAN_POS_ORDER)
+
+    if language == "일본어":
+        return order_by_priority(values, JAPANESE_POS_ORDER)
+
+    return sorted(values)
+
+
+def ordered_detailed_pos(
+    language: str,
+    pos_group: str,
+    values: list[str],
+) -> list[str]:
+    """선택한 언어와 대분류에 맞게 세부 품사 순서를 정합니다."""
+    if language == "한국어":
+        priority = KOREAN_DETAILED_POS_ORDER.get(pos_group, [])
+        return order_by_priority(values, priority)
+
+    if language == "일본어":
+        priority = JAPANESE_DETAILED_POS_ORDER.get(pos_group, [])
+        return order_by_priority(values, priority)
+
+    return sorted(values)
+
 EMOJI_PATTERN = re.compile(
     "["
     "\\U0001F1E6-\\U0001F1FF"
@@ -825,7 +1022,10 @@ elif analysis_language == "한국어":
 else:
     st.caption("현재 영어 분석에서는 영문 단어·숫자·기호 범주를 제공합니다.")
 
-available_pos_groups = sorted(lexical_df["품사 범주"].dropna().unique().tolist())
+available_pos_groups = ordered_pos_groups(
+    analysis_language,
+    lexical_df["품사 범주"].dropna().unique().tolist(),
+)
 
 if not available_pos_groups:
     st.info("현재 분석 결과에서 선택할 수 있는 품사를 찾지 못했습니다.")
@@ -839,11 +1039,13 @@ else:
             key="language_specific_pos_group",
         )
 
-    detailed_pos_options = sorted(
+    detailed_pos_options = ordered_detailed_pos(
+        analysis_language,
+        selected_pos_group,
         lexical_df.loc[
             lexical_df["품사 범주"] == selected_pos_group,
             "세부 품사",
-        ].dropna().unique().tolist()
+        ].dropna().unique().tolist(),
     )
 
     with selection_col2:
