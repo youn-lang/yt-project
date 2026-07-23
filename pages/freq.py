@@ -837,19 +837,16 @@ def analyze_english_text(text: str, rows: list[dict]) -> None:
         )
 
 
-def analyze_comments(comment_series: pd.Series, language: str) -> pd.DataFrame:
-    """메인 페이지에서 선택한 언어의 분석기만 사용합니다."""
-    rows: list[dict] = []
+def build_lexical_dataframe(
+    token_df: pd.DataFrame,
+    language: str,
+) -> pd.DataFrame:
+    """
+    토큰 단위 데이터프레임에서 화면 표시용 집계 데이터프레임을 만듭니다.
 
-    for text in comment_series:
-        text = str(text)
-        if language == "한국어":
-            analyze_korean_text(text, rows)
-        elif language == "일본어":
-            analyze_japanese_text(text, rows)
-        else:
-            analyze_english_text(text, rows)
-
+    token_df에는 댓글별 출현 순서와 실제 표기를 보존하고,
+    lexical_df에는 기존 화면에서 사용하던 형태소·기본형·품사별 빈도를 저장합니다.
+    """
     columns = [
         "언어",
         "형태소",
@@ -863,14 +860,10 @@ def analyze_comments(comment_series: pd.Series, language: str) -> pd.DataFrame:
         "원래 품사",
     ]
 
-    if not rows:
+    if token_df.empty:
         return pd.DataFrame(columns=columns)
 
-    token_df = pd.DataFrame(rows)
-
     if language == "일본어":
-        # 일본어는 정규화된 기본형과 품사를 기준으로 하나의 항목으로 집계합니다.
-        # 실제 댓글에 나온 한자·히라가나·활용형은 '표기 변이' 열에 보존합니다.
         group_columns = [
             "언어",
             "기본형",
@@ -879,7 +872,7 @@ def analyze_comments(comment_series: pd.Series, language: str) -> pd.DataFrame:
             "원래 품사",
         ]
 
-        grouped_rows = []
+        grouped_rows: list[dict] = []
 
         for group_values, group_df in token_df.groupby(
             group_columns,
@@ -901,7 +894,6 @@ def analyze_comments(comment_series: pd.Series, language: str) -> pd.DataFrame:
                     if str(value).strip()
                 }
             )
-
             normalized_variants = sorted(
                 {
                     str(value)
@@ -909,7 +901,6 @@ def analyze_comments(comment_series: pd.Series, language: str) -> pd.DataFrame:
                     if str(value).strip()
                 }
             )
-
             readings = sorted(
                 {
                     str(value)
@@ -967,13 +958,80 @@ def analyze_comments(comment_series: pd.Series, language: str) -> pd.DataFrame:
     return result_df[columns]
 
 
+def analyze_comments(
+    comment_series: pd.Series,
+    language: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    댓글을 한 번만 분석해 토큰 단위 token_df와 집계용 lexical_df를 함께 만듭니다.
+
+    token_df의 댓글 ID와 토큰 순서는 이후 공기어, N-gram, KWIC 분석에 사용할 수 있습니다.
+    """
+    token_rows: list[dict] = []
+
+    for comment_id, raw_text in enumerate(comment_series):
+        text = str(raw_text)
+        comment_rows: list[dict] = []
+
+        if language == "한국어":
+            analyze_korean_text(text, comment_rows)
+        elif language == "일본어":
+            analyze_japanese_text(text, comment_rows)
+        else:
+            analyze_english_text(text, comment_rows)
+
+        for token_index, row in enumerate(comment_rows):
+            token_rows.append(
+                {
+                    "댓글 ID": comment_id,
+                    "토큰 순서": token_index,
+                    "댓글 원문": text,
+                    **row,
+                }
+            )
+
+    token_columns = [
+        "댓글 ID",
+        "토큰 순서",
+        "댓글 원문",
+        "언어",
+        "형태소",
+        "기본형",
+        "정규화형",
+        "읽기",
+        "표기 변이",
+        "품사 범주",
+        "세부 품사",
+        "원래 품사",
+    ]
+
+    if not token_rows:
+        empty_token_df = pd.DataFrame(columns=token_columns)
+        empty_lexical_df = build_lexical_dataframe(
+            empty_token_df,
+            language,
+        )
+        return empty_token_df, empty_lexical_df
+
+    token_df = (
+        pd.DataFrame(token_rows)[token_columns]
+        .sort_values(["댓글 ID", "토큰 순서"])
+        .reset_index(drop=True)
+    )
+
+    lexical_df = build_lexical_dataframe(token_df, language)
+    return token_df, lexical_df
+
+
 @st.cache_data(show_spinner=False)
 def cached_analyze_comments(
     comment_tuple: tuple[str, ...],
     language: str,
-) -> pd.DataFrame:
+    schema_version: str = "token-df-v1",
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """댓글 분석 결과를 데이터 구조 버전과 함께 캐시합니다."""
+    _ = schema_version
     return analyze_comments(pd.Series(comment_tuple), language)
-
 
 
 # ------------------------------------------------------------
@@ -999,40 +1057,6 @@ def find_wordcloud_font(language: str) -> str | None:
             return candidate
 
     return None
-
-
-@st.cache_data(show_spinner=False)
-def build_surface_token_dataframe(
-    comment_tuple: tuple[str, ...],
-    language: str,
-) -> pd.DataFrame:
-    """댓글을 토큰 단위로 다시 분석해 실제 표기형 빈도 계산에 사용합니다."""
-    rows: list[dict] = []
-
-    for comment in comment_tuple:
-        if language == "한국어":
-            analyze_korean_text(str(comment), rows)
-        elif language == "일본어":
-            analyze_japanese_text(str(comment), rows)
-        else:
-            analyze_english_text(str(comment), rows)
-
-    if not rows:
-        return pd.DataFrame(
-            columns=["기본형", "실제 표기", "품사 범주", "세부 품사", "빈도수"]
-        )
-
-    token_df = pd.DataFrame(rows).rename(columns={"표기 변이": "실제 표기"})
-
-    return (
-        token_df.groupby(
-            ["기본형", "실제 표기", "품사 범주", "세부 품사"],
-            as_index=False,
-            dropna=False,
-        )
-        .size()
-        .rename(columns={"size": "빈도수"})
-    )
 
 
 def make_wordcloud_png(
@@ -1071,8 +1095,8 @@ analyzer_name = {
 
 with st.spinner(f"{analyzer_name}로 댓글 전체를 분석하는 중입니다..."):
     try:
-        lexical_df = cached_analyze_comments(
-            tuple(comments_df["댓글"].tolist()),
+        token_df, lexical_df = cached_analyze_comments(
+            tuple(comments_df["댓글"].astype(str).tolist()),
             analysis_language,
         )
     except OSError:
@@ -1083,6 +1107,11 @@ with st.spinner(f"{analyzer_name}로 댓글 전체를 분석하는 중입니다.
             )
             st.stop()
         raise
+
+# 이후 공기어·특징어·AI 해설 페이지가 같은 분석 결과를 재사용할 수 있도록 저장합니다.
+st.session_state["token_df"] = token_df
+st.session_state["lexical_df"] = lexical_df
+st.session_state["lexical_analysis_language"] = analysis_language
 
 
 # ------------------------------------------------------------
@@ -1180,7 +1209,7 @@ elif analysis_language == "한국어":
         "한국어 품사 범주를 먼저 고른 뒤 Kiwi의 세부 품사를 선택합니다."
     )
 else:
-    st.caption("현재 영어 분석에서는 영문 단어·숫자·기호 범주를 제공합니다.")
+    st.caption("spaCy의 영어 품사 범주와 Penn Treebank 세부 품사를 선택합니다.")
 
 available_pos_groups = ordered_pos_groups(
     analysis_language,
@@ -1504,9 +1533,16 @@ st.caption(
     "Word Cloud를 만듭니다. 정확한 빈도는 오른쪽 표에서 함께 확인할 수 있습니다."
 )
 
-surface_token_df = build_surface_token_dataframe(
-    tuple(comments_df["댓글"].astype(str).tolist()),
-    analysis_language,
+# 댓글을 다시 분석하지 않고 공통 token_df에서 실제 표기별 빈도를 만듭니다.
+surface_token_df = (
+    token_df.rename(columns={"표기 변이": "실제 표기"})
+    .groupby(
+        ["기본형", "실제 표기", "품사 범주", "세부 품사"],
+        as_index=False,
+        dropna=False,
+    )
+    .size()
+    .rename(columns={"size": "빈도수"})
 )
 
 if surface_token_df.empty:
