@@ -9,6 +9,9 @@ from kiwipiepy import Kiwi
 from sudachipy import dictionary, tokenizer
 
 
+TOKEN_CACHE_VERSION = "search004-pos-schema-v2"
+
+
 # ------------------------------------------------------------
 # 1. 페이지 기본 설정
 # ------------------------------------------------------------
@@ -203,6 +206,14 @@ def get_comments_dataframe() -> pd.DataFrame | None:
             return dataframe
 
     return None
+
+
+# 이전 코드 버전에서 남은 잘못된 세부 품사 값은 새 스키마에서 정리합니다.
+if st.session_state.get("_search_page_schema_version") != TOKEN_CACHE_VERSION:
+    st.session_state.pop("lemma_search_major_pos", None)
+    st.session_state.pop("lemma_search_detailed_pos", None)
+    st.session_state.pop("_previous_lemma_search_major_pos", None)
+    st.session_state["_search_page_schema_version"] = TOKEN_CACHE_VERSION
 
 
 comments_df = get_comments_dataframe()
@@ -701,8 +712,39 @@ def analyze_tokens(text: str, language: str) -> list[dict]:
 
 
 @st.cache_data(show_spinner=False)
-def cached_analyze_tokens(text: str, language: str) -> list[dict]:
+def cached_analyze_tokens(
+    text: str,
+    language: str,
+    cache_version: str,
+) -> list[dict]:
+    """
+    언어별 토큰 분석 결과를 캐시합니다.
+
+    cache_version은 반환 데이터 구조가 바뀔 때 이전 캐시를 무효화하기 위한 값입니다.
+    """
+    _ = cache_version
     return analyze_tokens(text, language)
+
+
+def validate_token_schema(tokens: list[dict]) -> list[dict]:
+    """
+    캐시된 토큰 결과가 현재 검색 페이지의 품사 스키마를 따르는지 검사합니다.
+    """
+    required_fields = {
+        "surface",
+        "lemma",
+        "pos",
+        "major_pos",
+        "detailed_pos",
+        "start",
+        "end",
+    }
+
+    for token in tokens:
+        if not required_fields.issubset(token.keys()):
+            raise ValueError("구형 토큰 캐시 구조가 감지되었습니다.")
+
+    return tokens
 
 
 def normalize_lemma_for_comparison(lemma: str, language: str) -> str:
@@ -747,7 +789,19 @@ def find_lemma_matches(
     """기본형이 일치하는 토큰과 원문 위치·품사 정보를 반환합니다."""
     matches: list[dict] = []
 
-    for token in cached_analyze_tokens(text, language):
+    cached_tokens = cached_analyze_tokens(
+        text,
+        language,
+        TOKEN_CACHE_VERSION,
+    )
+
+    try:
+        tokens = validate_token_schema(cached_tokens)
+    except ValueError:
+        # 구형 캐시 구조가 감지되면 현재 분석 함수를 직접 실행합니다.
+        tokens = analyze_tokens(text, language)
+
+    for token in tokens:
         token_lemma = normalize_lemma_for_comparison(token["lemma"], language)
 
         if token_lemma in target_lemmas:
@@ -755,8 +809,8 @@ def find_lemma_matches(
                 {
                     "surface": str(token["surface"]),
                     "lemma": str(token["lemma"]),
-                    "major_pos": str(token.get("major_pos", token.get("pos", "기타"))),
-                    "detailed_pos": str(token.get("detailed_pos", token.get("pos", "기타"))),
+                    "major_pos": str(token["major_pos"]),
+                    "detailed_pos": str(token["detailed_pos"]),
                     "start": int(token["start"]),
                     "end": int(token["end"]),
                 }
@@ -834,11 +888,21 @@ if clean_search_text:
 
                 filter_col1, filter_col2 = st.columns(2)
 
+                previous_major_pos = st.session_state.get(
+                    "_previous_lemma_search_major_pos"
+                )
+
                 with filter_col1:
                     selected_major_pos = st.selectbox(
                         "품사 범주",
                         options=major_options,
                         key="lemma_search_major_pos",
+                    )
+
+                if previous_major_pos != selected_major_pos:
+                    st.session_state["lemma_search_detailed_pos"] = "전체"
+                    st.session_state["_previous_lemma_search_major_pos"] = (
+                        selected_major_pos
                     )
 
                 if selected_major_pos == "전체":
@@ -848,9 +912,23 @@ if clean_search_text:
                         all_match_df["major_pos"] == selected_major_pos
                     ]
 
-                detailed_options = ["전체"] + sorted(
-                    detail_source["detailed_pos"].dropna().astype(str).unique().tolist()
+                detailed_values = (
+                    detail_source["detailed_pos"]
+                    .dropna()
+                    .astype(str)
+                    .unique()
+                    .tolist()
                 )
+
+                detailed_options = ["전체"] + sorted(detailed_values)
+
+                current_detail_value = st.session_state.get(
+                    "lemma_search_detailed_pos",
+                    "전체",
+                )
+
+                if current_detail_value not in detailed_options:
+                    st.session_state["lemma_search_detailed_pos"] = "전체"
 
                 with filter_col2:
                     selected_detailed_pos = st.selectbox(
