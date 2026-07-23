@@ -459,6 +459,93 @@ def highlight_text(text: str, spans: list[tuple[int, int]]) -> str:
     return "".join(output)
 
 
+
+# ------------------------------------------------------------
+# 기본형 검색에 사용할 언어별 품사 표시 체계
+# ------------------------------------------------------------
+KOREAN_POS_NAMES = {
+    "NNG": "일반 명사", "NNP": "고유 명사", "NNB": "의존 명사",
+    "NR": "수사", "NP": "대명사", "VV": "동사", "VA": "형용사",
+    "VX": "보조 용언", "VCP": "긍정 지정사", "VCN": "부정 지정사",
+    "MM": "관형사", "MAG": "일반 부사", "MAJ": "접속 부사",
+    "IC": "감탄사", "JKS": "주격 조사", "JKC": "보격 조사",
+    "JKG": "관형격 조사", "JKO": "목적격 조사", "JKB": "부사격 조사",
+    "JKV": "호격 조사", "JKQ": "인용격 조사", "JX": "보조사",
+    "JC": "접속 조사", "EP": "선어말 어미", "EF": "종결 어미",
+    "EC": "연결 어미", "ETN": "명사형 전성 어미", "ETM": "관형형 전성 어미",
+    "XPN": "접두사", "XSN": "명사 파생 접미사", "XSV": "동사 파생 접미사",
+    "XSA": "형용사 파생 접미사", "XR": "어근",
+    "SF": "마침표·물음표·느낌표", "SP": "쉼표·가운뎃점·콜론",
+    "SS": "괄호·따옴표", "SSO": "여는 괄호·따옴표", "SSC": "닫는 괄호·따옴표",
+    "SE": "줄임표", "SO": "붙임표", "SW": "기타 기호",
+    "SL": "영문", "SH": "한자", "SN": "숫자",
+    "W_URL": "URL", "W_EMAIL": "이메일", "W_HASHTAG": "해시태그",
+    "W_MENTION": "멘션", "W_SERIAL": "일련번호", "Z_CODA": "덧붙은 받침",
+    "USER0": "사용자 정의어",
+}
+
+KOREAN_POS_GROUPS = {
+    "명사": {"NNG", "NNP", "NNB"},
+    "대명사·수사": {"NP", "NR"},
+    "동사": {"VV", "VX", "VCP", "VCN"},
+    "형용사": {"VA"},
+    "관형사": {"MM"},
+    "부사": {"MAG", "MAJ"},
+    "감탄사": {"IC"},
+    "조사": {"JKS", "JKC", "JKG", "JKO", "JKB", "JKV", "JKQ", "JX", "JC"},
+    "어미": {"EP", "EF", "EC", "ETN", "ETM"},
+    "접사·어근": {"XPN", "XSN", "XSV", "XSA", "XR", "Z_CODA"},
+    "영문": {"SL"},
+    "한자": {"SH"},
+    "숫자": {"SN"},
+    "문장부호": {"SF", "SP", "SS", "SSO", "SSC", "SE", "SO"},
+    "기타 기호": {"SW"},
+    "웹 표현": {"W_URL", "W_EMAIL", "W_HASHTAG", "W_MENTION", "W_SERIAL"},
+    "기타": {"USER0"},
+}
+
+KOREAN_POS_ORDER = [
+    "명사", "대명사·수사", "동사", "형용사", "관형사", "부사", "감탄사",
+    "접사·어근", "조사", "어미", "영문", "한자", "숫자", "이모지",
+    "문장부호", "기타 기호", "웹 표현", "기타",
+]
+
+JAPANESE_POS_ORDER = [
+    "名詞", "代名詞", "動詞", "形容詞", "形状詞", "連体詞", "副詞",
+    "接続詞", "感動詞", "接頭辞", "接尾辞", "助詞", "助動詞",
+    "絵文字", "記号", "補助記号", "空白", "未分類",
+]
+
+ENGLISH_POS_ORDER = [
+    "NOUN", "PROPN", "VERB", "ADJ", "ADV", "PRON", "NUM", "INTJ",
+    "AUX", "DET", "ADP", "PART", "CCONJ", "SCONJ", "PUNCT", "SYM", "X",
+]
+
+
+def korean_major_pos(tag: str) -> str:
+    for group_name, tags in KOREAN_POS_GROUPS.items():
+        if tag in tags:
+            return group_name
+    return "기타"
+
+
+def japanese_detailed_pos(pos_tuple: tuple[str, ...]) -> str:
+    meaningful = [item for item in pos_tuple[:3] if item and item != "*"]
+    return "-".join(meaningful) if meaningful else "未分類"
+
+
+def ordered_values(values: list[str], priority: list[str]) -> list[str]:
+    unique_values = list(dict.fromkeys(str(value) for value in values))
+    priority_index = {value: index for index, value in enumerate(priority)}
+    return sorted(
+        unique_values,
+        key=lambda value: (
+            priority_index.get(value, len(priority_index)),
+            value,
+        ),
+    )
+
+
 # ------------------------------------------------------------
 # 5. 언어별 기본형 분석
 # ------------------------------------------------------------
@@ -526,6 +613,8 @@ def analyze_korean_tokens(text: str) -> list[dict]:
                 "surface": text[start:end],
                 "lemma": make_korean_base_form(form, token.tag),
                 "pos": token.tag,
+                "major_pos": korean_major_pos(token.tag),
+                "detailed_pos": KOREAN_POS_NAMES.get(token.tag, token.tag),
                 "start": start,
                 "end": end,
             }
@@ -567,6 +656,8 @@ def analyze_japanese_tokens(text: str) -> list[dict]:
                 "surface": form,
                 "lemma": lemma,
                 "pos": major_pos,
+                "major_pos": major_pos,
+                "detailed_pos": japanese_detailed_pos(pos_tuple),
                 "start": int(morpheme.begin()),
                 "end": int(morpheme.end()),
             }
@@ -591,6 +682,8 @@ def analyze_english_tokens(text: str) -> list[dict]:
                 "surface": token.text,
                 "lemma": lemma.lower(),
                 "pos": token.pos_ or "X",
+                "major_pos": token.pos_ or "X",
+                "detailed_pos": token.tag_ or "X",
                 "start": int(token.idx),
                 "end": int(token.idx + len(token.text)),
             }
@@ -650,18 +743,26 @@ def find_lemma_matches(
     text: str,
     target_lemmas: set[str],
     language: str,
-) -> tuple[list[tuple[int, int]], list[str]]:
-    spans: list[tuple[int, int]] = []
-    matched_lemmas: list[str] = []
+) -> list[dict]:
+    """기본형이 일치하는 토큰과 원문 위치·품사 정보를 반환합니다."""
+    matches: list[dict] = []
 
     for token in cached_analyze_tokens(text, language):
         token_lemma = normalize_lemma_for_comparison(token["lemma"], language)
 
         if token_lemma in target_lemmas:
-            spans.append((int(token["start"]), int(token["end"])))
-            matched_lemmas.append(str(token["lemma"]))
+            matches.append(
+                {
+                    "surface": str(token["surface"]),
+                    "lemma": str(token["lemma"]),
+                    "major_pos": str(token.get("major_pos", token.get("pos", "기타"))),
+                    "detailed_pos": str(token.get("detailed_pos", token.get("pos", "기타"))),
+                    "start": int(token["start"]),
+                    "end": int(token["end"]),
+                }
+            )
 
-    return spans, matched_lemmas
+    return matches
 
 
 # ------------------------------------------------------------
@@ -671,6 +772,11 @@ clean_search_text = search_text.strip()
 
 if clean_search_text:
     try:
+        target_lemmas: list[str] = []
+        selected_major_pos = "전체"
+        selected_detailed_pos = "전체"
+        pos_frequency_df = pd.DataFrame()
+
         if search_mode == "원문 문자열 검색":
             occurrence_spans = comments_df["댓글"].apply(
                 lambda text: find_occurrence_spans(
@@ -684,23 +790,144 @@ if clean_search_text:
                 [[] for _ in range(len(comments_df))],
                 index=comments_df.index,
             )
-            target_lemmas: list[str] = []
+            matched_pos_series = pd.Series(
+                [[] for _ in range(len(comments_df))],
+                index=comments_df.index,
+            )
+
         else:
-            with st.spinner("검색어와 댓글의 기본형을 분석하는 중입니다..."):
+            with st.spinner("검색어와 댓글의 기본형·품사를 분석하는 중입니다..."):
                 target_lemmas = extract_query_lemmas(
                     clean_search_text,
                     analysis_language,
                 )
                 target_lemma_set = set(target_lemmas)
-                lemma_results = comments_df["댓글"].apply(
+
+                all_lemma_matches = comments_df["댓글"].apply(
                     lambda text: find_lemma_matches(
                         str(text),
                         target_lemma_set,
                         analysis_language,
                     )
                 )
-                occurrence_spans = lemma_results.apply(lambda result: result[0])
-                matched_lemmas_series = lemma_results.apply(lambda result: result[1])
+
+            all_match_rows = [
+                match
+                for matches in all_lemma_matches
+                for match in matches
+            ]
+
+            if all_match_rows:
+                all_match_df = pd.DataFrame(all_match_rows)
+
+                if analysis_language == "한국어":
+                    major_order = KOREAN_POS_ORDER
+                elif analysis_language == "일본어":
+                    major_order = JAPANESE_POS_ORDER
+                else:
+                    major_order = ENGLISH_POS_ORDER
+
+                major_options = ["전체"] + ordered_values(
+                    all_match_df["major_pos"].tolist(),
+                    major_order,
+                )
+
+                filter_col1, filter_col2 = st.columns(2)
+
+                with filter_col1:
+                    selected_major_pos = st.selectbox(
+                        "품사 범주",
+                        options=major_options,
+                        key="lemma_search_major_pos",
+                    )
+
+                if selected_major_pos == "전체":
+                    detail_source = all_match_df
+                else:
+                    detail_source = all_match_df[
+                        all_match_df["major_pos"] == selected_major_pos
+                    ]
+
+                detailed_options = ["전체"] + sorted(
+                    detail_source["detailed_pos"].dropna().astype(str).unique().tolist()
+                )
+
+                with filter_col2:
+                    selected_detailed_pos = st.selectbox(
+                        "세부 품사",
+                        options=detailed_options,
+                        key="lemma_search_detailed_pos",
+                    )
+
+                def apply_pos_filter(matches: list[dict]) -> list[dict]:
+                    filtered = matches
+
+                    if selected_major_pos != "전체":
+                        filtered = [
+                            match
+                            for match in filtered
+                            if match["major_pos"] == selected_major_pos
+                        ]
+
+                    if selected_detailed_pos != "전체":
+                        filtered = [
+                            match
+                            for match in filtered
+                            if match["detailed_pos"] == selected_detailed_pos
+                        ]
+
+                    return filtered
+
+                filtered_match_series = all_lemma_matches.apply(apply_pos_filter)
+
+                occurrence_spans = filtered_match_series.apply(
+                    lambda matches: [
+                        (match["start"], match["end"])
+                        for match in matches
+                    ]
+                )
+                matched_lemmas_series = filtered_match_series.apply(
+                    lambda matches: [match["lemma"] for match in matches]
+                )
+                matched_pos_series = filtered_match_series.apply(
+                    lambda matches: [
+                        f'{match["major_pos"]} / {match["detailed_pos"]}'
+                        for match in matches
+                    ]
+                )
+
+                pos_frequency_df = (
+                    all_match_df.groupby(
+                        ["major_pos", "detailed_pos"],
+                        as_index=False,
+                    )
+                    .size()
+                    .rename(
+                        columns={
+                            "major_pos": "품사 범주",
+                            "detailed_pos": "세부 품사",
+                            "size": "빈도수",
+                        }
+                    )
+                    .sort_values(
+                        ["빈도수", "품사 범주", "세부 품사"],
+                        ascending=[False, True, True],
+                    )
+                )
+            else:
+                occurrence_spans = pd.Series(
+                    [[] for _ in range(len(comments_df))],
+                    index=comments_df.index,
+                )
+                matched_lemmas_series = pd.Series(
+                    [[] for _ in range(len(comments_df))],
+                    index=comments_df.index,
+                )
+                matched_pos_series = pd.Series(
+                    [[] for _ in range(len(comments_df))],
+                    index=comments_df.index,
+                )
+
     except OSError:
         if analysis_language == "영어":
             st.error(
@@ -716,6 +943,7 @@ if clean_search_text:
     matched_comments["검색 항목 출현 횟수"] = occurrence_counts.loc[matched_mask].astype(int)
     matched_comments["_검색_범위"] = occurrence_spans.loc[matched_mask]
     matched_comments["_일치_기본형"] = matched_lemmas_series.loc[matched_mask]
+    matched_comments["_일치_품사"] = matched_pos_series.loc[matched_mask]
 
     total_occurrences = int(matched_comments["검색 항목 출현 횟수"].sum())
 
@@ -750,11 +978,44 @@ if clean_search_text:
         else:
             st.warning("검색어에서 유효한 기본형을 추출하지 못했습니다.")
 
+        if not pos_frequency_df.empty:
+            st.markdown("#### 기본형의 품사별 빈도")
+
+            display_pos_frequency = pos_frequency_df.copy()
+            display_pos_frequency["선택 조건"] = ""
+
+            condition_mask = pd.Series(True, index=display_pos_frequency.index)
+
+            if selected_major_pos != "전체":
+                condition_mask &= (
+                    display_pos_frequency["품사 범주"] == selected_major_pos
+                )
+
+            if selected_detailed_pos != "전체":
+                condition_mask &= (
+                    display_pos_frequency["세부 품사"] == selected_detailed_pos
+                )
+
+            display_pos_frequency.loc[condition_mask, "선택 조건"] = "✓"
+
+            st.dataframe(
+                display_pos_frequency[
+                    ["품사 범주", "세부 품사", "빈도수", "선택 조건"]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            st.caption(
+                "품사별 빈도표는 해당 기본형의 전체 품사 분포를 보여 줍니다. "
+                "위 필터를 적용하면 검색 빈도와 댓글 목록에는 선택한 품사만 반영됩니다."
+            )
+
     if matched_comments.empty:
         empty_message = (
             "입력한 문자열이 사용된 댓글이 없습니다."
             if search_mode == "원문 문자열 검색"
-            else "같은 기본형으로 분석된 형태가 사용된 댓글이 없습니다."
+            else "선택한 기본형과 품사 조건에 맞는 형태가 사용된 댓글이 없습니다."
         )
         st.info(empty_message)
     else:
@@ -769,9 +1030,15 @@ if clean_search_text:
                 + normalization_note
             )
         else:
+            selected_condition = "전체 품사"
+            if selected_major_pos != "전체":
+                selected_condition = selected_major_pos
+            if selected_detailed_pos != "전체":
+                selected_condition += f" / {selected_detailed_pos}"
+
             st.caption(
-                "댓글에 실제로 나타난 활용형·굴절형을 강조합니다. "
-                "동일한 표면형이라도 분석기가 다른 기본형을 부여하면 검색 결과에서 제외될 수 있습니다."
+                f"현재 검색 조건: {selected_condition}. "
+                "댓글에 실제로 나타난 활용형·굴절형을 강조합니다."
             )
 
         st.markdown(
@@ -803,25 +1070,46 @@ if clean_search_text:
             safe_likes = html.escape(str(likes))
             highlighted_comment = highlight_text(comment_text, spans)
 
-            match_label = "검색 문자열" if search_mode == "원문 문자열 검색" else "기본형 일치"
+            match_label = (
+                "검색 문자열"
+                if search_mode == "원문 문자열 검색"
+                else "기본형·품사 일치"
+            )
+
             lemma_note = ""
             if search_mode == "기본형 검색":
                 matched_lemmas = list(dict.fromkeys(row.get("_일치_기본형", [])))
+                matched_pos = list(dict.fromkeys(row.get("_일치_품사", [])))
+
+                note_parts = []
                 if matched_lemmas:
-                    lemma_note = " · 일치 기본형 " + html.escape(", ".join(matched_lemmas))
+                    note_parts.append(
+                        "기본형: "
+                        + ", ".join(html.escape(value) for value in matched_lemmas)
+                    )
+                if matched_pos:
+                    note_parts.append(
+                        "품사: "
+                        + ", ".join(html.escape(value) for value in matched_pos)
+                    )
+
+                if note_parts:
+                    lemma_note = " · " + " · ".join(note_parts)
 
             st.markdown(
                 f"""
-                <div class="comment-card">
+                <article class="comment-card">
                     <div class="comment-meta">
                         {row_number}. {safe_author}
                         · {safe_date}
                         · 좋아요 {safe_likes}
-                        · {match_label} {occurrence_count}회{lemma_note}
+                        · {match_label} {occurrence_count}회
+                        {lemma_note}
                     </div>
                     <div class="comment-text">{highlighted_comment}</div>
-                </div>
+                </article>
                 """,
                 unsafe_allow_html=True,
             )
-
+else:
+    st.info("검색어를 입력하면 결과가 표시됩니다.")
